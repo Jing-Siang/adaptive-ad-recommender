@@ -1,0 +1,59 @@
+"""Generate synthetic user personas with an LLM-written browsing/interest history,
+clearly labeled as synthetic. Embeds each persona's rolling profile and upserts it
+into the Pinecone `users` namespace."""
+
+import argparse
+import json
+
+from functools import lru_cache
+
+import anthropic
+
+from app.config import settings
+from app.embeddings import embed_query
+from app.retrieval import get_index
+
+
+@lru_cache
+def _get_client() -> anthropic.Anthropic:
+    return anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+
+_PROMPT = """Generate {n} distinct synthetic user personas for an ad-recommendation demo.
+Each persona should have a short, plausible browsing/interest history (2-3 sentences).
+Respond with ONLY a JSON array, no prose: [{{"user_id": str, "interest_summary": str}}]"""
+
+
+def generate_personas(n: int = 20) -> list[dict]:
+    message = _get_client().messages.create(
+        model=settings.claude_model,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": _PROMPT.format(n=n)}],
+    )
+    return json.loads(message.content[0].text)
+
+
+def index_personas(personas: list[dict]) -> None:
+    index = get_index()
+    vectors = embed_query([p["interest_summary"] for p in personas])
+    index.upsert(
+        vectors=[
+            {
+                "id": p["user_id"],
+                "values": vector,
+                "metadata": {"interest_summary": p["interest_summary"], "synthetic": True},
+            }
+            for p, vector in zip(personas, vectors)
+        ],
+        namespace="users",
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--n", type=int, default=20, help="Number of personas to generate")
+    args = parser.parse_args()
+
+    personas = generate_personas(args.n)
+    index_personas(personas)
+    print(f"Generated and indexed {len(personas)} synthetic personas.")
