@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=ad_recommender
+      - POSTGRES_PASSWORD=ad_recommender
+      - POSTGRES_DB=ad_recommender
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   backend:
     build: ./backend
     ports:
@@ -8,6 +24,20 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/data:/app/data
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build: ./backend
+    command: rq worker --url redis://redis:6379 campaign_review
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - postgres
+      - redis
 
   frontend:
     build: ./frontend
@@ -19,3 +49,6 @@ services:
       - ./frontend/src:/app/src
     depends_on:
       - backend
+
+volumes:
+  postgres_data:

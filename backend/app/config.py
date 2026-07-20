@@ -11,9 +11,14 @@ class Settings(BaseSettings):
     pinecone_index_name: str = "adaptive-ad-recommender"
     pinecone_environment: str = ""
 
+    database_url: str = "postgresql+psycopg://ad_recommender:ad_recommender@localhost:5432/ad_recommender"
+    redis_url: str = "redis://localhost:6379"
+
     claude_model: str = "claude-sonnet-5"
     voyage_index_model: str = "voyage-4-large"
     voyage_query_model: str = "voyage-4-lite"
+
+    ad_policy_mcp_url: str = ""
 
     slack_webhook_url: str = ""
     mcp_server_url: str = ""
