@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     voyage_index_model: str = "voyage-4-large"
     voyage_query_model: str = "voyage-4-lite"
 
-    ad_policy_mcp_url: str = ""
-
     slack_webhook_url: str = ""
     mcp_server_url: str = ""
 
