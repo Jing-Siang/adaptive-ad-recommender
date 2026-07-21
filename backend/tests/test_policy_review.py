@@ -2,13 +2,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.policy_review import review_campaign
+from app.campaigns.policy_review import review_campaign
 from app.schemas import ReviewDecision
 
 
 @pytest.mark.asyncio
-@patch("app.policy_review._call_reviewer", new_callable=AsyncMock)
-@patch("app.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
+@patch("app.campaigns.policy_review._call_reviewer", new_callable=AsyncMock)
+@patch("app.campaigns.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
 async def test_review_campaign_approved(mock_fetch_policy, mock_call_reviewer):
     mock_call_reviewer.return_value = ReviewDecision(
         outcome="approved", reason="ordinary product ad, no policy conflicts", excluded_categories=[]
@@ -27,8 +27,8 @@ async def test_review_campaign_approved(mock_fetch_policy, mock_call_reviewer):
 
 
 @pytest.mark.asyncio
-@patch("app.policy_review._call_reviewer", new_callable=AsyncMock)
-@patch("app.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
+@patch("app.campaigns.policy_review._call_reviewer", new_callable=AsyncMock)
+@patch("app.campaigns.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
 async def test_review_campaign_adds_required_exclusions(mock_fetch_policy, mock_call_reviewer):
     mock_call_reviewer.return_value = ReviewDecision(
         outcome="approved",
@@ -48,8 +48,8 @@ async def test_review_campaign_adds_required_exclusions(mock_fetch_policy, mock_
 
 
 @pytest.mark.asyncio
-@patch("app.policy_review._call_reviewer", new_callable=AsyncMock)
-@patch("app.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
+@patch("app.campaigns.policy_review._call_reviewer", new_callable=AsyncMock)
+@patch("app.campaigns.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
 async def test_review_campaign_needs_review(mock_fetch_policy, mock_call_reviewer):
     mock_call_reviewer.return_value = ReviewDecision(
         outcome="needs_review", reason="ambiguous financial claim, escalating", excluded_categories=[]

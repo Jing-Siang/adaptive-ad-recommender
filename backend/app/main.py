@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.campaigns_api import router as campaigns_router
-from app.config import settings
-from app.guardrails import check_guardrails
-from app.logging_utils import log_duration, log_event
-from app.ranking import rerank
-from app.retrieval import retrieve_candidates
+from app.campaigns.api import router as campaigns_router
+from app.core.config import settings
+from app.serving.guardrails import check_guardrails
+from app.core.logging_utils import log_duration, log_event
+from app.serving.ranking import rerank
+from app.serving.retrieval import retrieve_candidates
 from app.schemas import (
     Ad,
     FeedbackEvent,

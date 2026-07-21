@@ -1,10 +1,28 @@
+"""Pydantic schemas shared across the app. Kept in one file (not split into
+app/serving/ and app/campaigns/) because a handful of schemas here — Ad,
+AdCandidate — are used by both sides: campaigns get embedded into Pinecone
+using the Ad shape, and the serving pipeline reads them back out the same way.
+
+Organized into two sections matching the two pipelines in app/:
+  - Serving:   retrieve -> re-rank -> guardrail -> serve -> feedback
+  - Campaigns: advertiser submits -> policy review -> (maybe) moderation
+"""
+
 from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# --------------------------------------------------------------------------
+# Serving: recommending an ad to a user (app/serving/)
+# --------------------------------------------------------------------------
+
 
 class Ad(BaseModel):
+    """A single ad's content — what actually gets embedded into Pinecone.
+    Filled in from an approved Campaign's headline/description/category
+    (see app/serving/retrieval.py:index_campaign)."""
+
     ad_id: str
     headline: str
     description: str
@@ -13,37 +31,61 @@ class Ad(BaseModel):
 
 
 class AdCandidate(Ad):
+    """An Ad plus how close it scored to a user's profile vector — the
+    result of the cheap vector-search pass in retrieve_candidates, before
+    any LLM re-ranking happens."""
+
     similarity_score: float
 
 
 class UserProfile(BaseModel):
+    """A user's rolling interest profile. profile_vector is the embedding
+    stored/updated in Pinecone's `users` namespace; feedback.py nudges it
+    based on click/no_click/conversion outcomes."""
+
     user_id: str
     interest_summary: str
     profile_vector: list[float] | None = None
 
 
 class RankedAd(BaseModel):
+    """One candidate's LLM-assigned relevance, after re-ranking. This is
+    the structured output ranking.py asks the LLM for — one per candidate."""
+
     ad_id: str
     relevance_score: float = Field(ge=0, le=1)
     justification: str
 
 
 class RankingResponse(BaseModel):
+    """The full structured-output shape the LLM returns in one call: a
+    ranking for every candidate it was given."""
+
     rankings: list[RankedAd]
 
 
 class GuardrailResult(BaseModel):
+    """Whether a specific ad is allowed to serve in the current context —
+    the outcome of guardrails.check_guardrails, run after re-ranking."""
+
     ad_id: str
     allowed: bool
     reason: str | None = None
 
 
 class RecommendationRequest(BaseModel):
+    """Request body for POST /recommend."""
+
     user_id: str
     top_k: int = 10
 
 
 class RecommendationTrace(BaseModel):
+    """Full decision trace returned by POST /recommend — every candidate,
+    every ranking, every guardrail check, and which ad (if any) actually
+    got served. This is the "explainability" artifact: enough to answer
+    "why was this ad chosen" after the fact."""
+
     user_id: str
     candidates: list[AdCandidate]
     rankings: list[RankedAd]
@@ -52,12 +94,26 @@ class RecommendationTrace(BaseModel):
 
 
 class FeedbackEvent(BaseModel):
+    """Request body for POST /feedback — a simulated click/no_click/
+    conversion outcome for a served ad, used to nudge the user's profile
+    vector (see feedback.update_profile_vector)."""
+
     user_id: str
     ad_id: str
     outcome: str = Field(pattern="^(click|no_click|conversion)$")
 
 
+# --------------------------------------------------------------------------
+# Campaigns: an advertiser submitting a campaign for review (app/campaigns/)
+# --------------------------------------------------------------------------
+
+
 class ReviewDecision(BaseModel):
+    """Structured output the policy review agent returns (see
+    campaigns/policy_review.py). Drives what happens next: approved ->
+    embed + index into Pinecone; rejected -> reason stored, visible to the
+    submitter; needs_review -> surfaces in the moderator queue."""
+
     outcome: Literal["approved", "rejected", "needs_review"]
     reason: str
     excluded_categories: list[str] = Field(
@@ -68,6 +124,10 @@ class ReviewDecision(BaseModel):
 
 
 class CampaignCreateRequest(BaseModel):
+    """Request body for POST /campaigns. advertiser_name is get-or-create —
+    there's no separate advertiser-signup step (no auth in this project,
+    see docs/spec.md)."""
+
     advertiser_name: str
     headline: str
     description: str
@@ -80,6 +140,10 @@ class CampaignCreateRequest(BaseModel):
 
 
 class CampaignResponse(BaseModel):
+    """Read model for a Campaign row — returned by every campaigns/api.py
+    endpoint. model_config lets this be built directly from a SQLAlchemy
+    Campaign instance (Pydantic v2's from_attributes, formerly orm_mode)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -101,6 +165,10 @@ class CampaignResponse(BaseModel):
 
 
 class ModerationRequest(BaseModel):
+    """Request body for POST /campaigns/{id}/moderate — a human resolving a
+    needs_review campaign. reviewed_by is a freeform name for the audit
+    trail only, not a verified identity (no auth in this project)."""
+
     outcome: Literal["approved", "rejected"]
     reason: str
     reviewed_by: str

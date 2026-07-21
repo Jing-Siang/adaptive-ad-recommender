@@ -3,7 +3,7 @@ from functools import lru_cache
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-from app.config import settings
+from app.core.config import settings
 
 
 @lru_cache

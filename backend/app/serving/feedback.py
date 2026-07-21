@@ -1,6 +1,6 @@
 import numpy as np
 
-from app.retrieval import upsert_user_vector
+from app.serving.retrieval import upsert_user_vector
 from app.schemas import FeedbackEvent
 
 # How strongly a single outcome nudges the profile vector toward/away from an ad.

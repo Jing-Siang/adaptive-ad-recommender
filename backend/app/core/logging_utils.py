@@ -4,7 +4,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from app.config import settings
+from app.core.config import settings
 
 logger = logging.getLogger("ad_recommender")
 logger.setLevel(settings.log_level)

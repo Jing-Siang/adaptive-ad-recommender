@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.ranking import rerank
+from app.serving.ranking import rerank
 from app.schemas import AdCandidate, RankedAd, RankingResponse
 
 CANDIDATE = AdCandidate(
@@ -16,7 +16,7 @@ def _mock_parsed_response(ranking_response: RankingResponse) -> MagicMock:
     return response
 
 
-@patch("app.ranking._get_client")
+@patch("app.serving.ranking._get_client")
 def test_rerank_returns_parsed_rankings(mock_get_client):
     mock_client = MagicMock()
     mock_client.responses.parse.return_value = _mock_parsed_response(
@@ -33,7 +33,7 @@ def test_rerank_returns_parsed_rankings(mock_get_client):
     assert kwargs["text_format"] is RankingResponse
 
 
-@patch("app.ranking._get_client")
+@patch("app.serving.ranking._get_client")
 def test_rerank_retries_on_transient_error_then_succeeds(mock_get_client):
     mock_client = MagicMock()
     mock_client.responses.parse.side_effect = [
@@ -50,7 +50,7 @@ def test_rerank_retries_on_transient_error_then_succeeds(mock_get_client):
     assert mock_client.responses.parse.call_count == 2
 
 
-@patch("app.ranking._get_client")
+@patch("app.serving.ranking._get_client")
 def test_rerank_raises_after_repeated_failures(mock_get_client):
     mock_client = MagicMock()
     mock_client.responses.parse.side_effect = RuntimeError("persistent API error")

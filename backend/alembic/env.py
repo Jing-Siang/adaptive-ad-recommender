@@ -5,8 +5,8 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from app.config import settings
-from app.db import Base
+from app.core.config import settings
+from app.core.db import Base
 from app.models import Advertiser, Campaign  # noqa: F401 — import so they register on Base.metadata
 
 # this is the Alembic Config object, which provides

@@ -2,8 +2,8 @@ from functools import lru_cache
 
 from pinecone import Pinecone
 
-from app.config import settings
-from app.embeddings import embed_ads, embed_query
+from app.core.config import settings
+from app.core.embeddings import embed_ads, embed_query
 from app.models import Campaign
 from app.schemas import AdCandidate
 

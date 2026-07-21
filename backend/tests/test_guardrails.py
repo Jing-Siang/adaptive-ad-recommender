@@ -1,6 +1,6 @@
 import pytest
 
-from app.guardrails import check_guardrails
+from app.serving.guardrails import check_guardrails
 from app.schemas import Ad
 
 ALCOHOL_AD = Ad(ad_id="ad-1", headline="Craft beer club", description="Monthly beer subscription", category="alcohol")

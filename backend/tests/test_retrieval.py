@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock, patch
 
-from app.retrieval import retrieve_candidates
+from app.serving.retrieval import retrieve_candidates
 
 
-@patch("app.retrieval.get_index")
-@patch("app.retrieval.embed_query", return_value=[[0.1, 0.2, 0.3]])
+@patch("app.serving.retrieval.get_index")
+@patch("app.serving.retrieval.embed_query", return_value=[[0.1, 0.2, 0.3]])
 def test_retrieve_candidates_maps_matches_to_ad_candidates(mock_embed_query, mock_get_index):
     mock_index = MagicMock()
     mock_index.query.return_value = {
@@ -29,8 +29,8 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(mock_embed_query, moc
     assert kwargs["top_k"] == 5
 
 
-@patch("app.retrieval.get_index")
-@patch("app.retrieval.embed_query", return_value=[[0.1, 0.2, 0.3]])
+@patch("app.serving.retrieval.get_index")
+@patch("app.serving.retrieval.embed_query", return_value=[[0.1, 0.2, 0.3]])
 def test_retrieve_candidates_empty_result(mock_embed_query, mock_get_index):
     mock_index = MagicMock()
     mock_index.query.return_value = {"matches": []}

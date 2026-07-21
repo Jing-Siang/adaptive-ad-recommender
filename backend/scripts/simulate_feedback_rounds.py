@@ -4,9 +4,9 @@ re-recommend, and prints CTR improving across rounds plus one example decision t
 import argparse
 import random
 
-from app.feedback import update_profile_vector
-from app.ranking import rerank
-from app.retrieval import retrieve_candidates
+from app.serving.feedback import update_profile_vector
+from app.serving.ranking import rerank
+from app.serving.retrieval import retrieve_candidates
 
 
 def simulate_click(ranked_ads, click_prob_top: float = 0.6) -> str | None:

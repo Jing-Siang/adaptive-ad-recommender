@@ -118,25 +118,41 @@ system runs and accumulates data over time.
 
 ---
 
-## Suggested repo structure
+## Repo structure
+
+`app/` is split into two pipelines plus shared modules — `core/` (infra),
+`serving/` (retrieve → re-rank → guardrail → serve → feedback), and
+`campaigns/` (advertiser submits → policy review → moderation):
 
 ```
-ad-recommendation-engine/
+backend/
 ├── app/
-│   ├── main.py                 # FastAPI entrypoint
-│   ├── embeddings.py            # OpenAI embeddings client + helpers
-│   ├── retrieval.py              # Pinecone query logic
-│   ├── ranking.py                # Claude re-ranking + Pydantic schemas
-│   ├── guardrails.py             # brand-safety filtering
-│   ├── feedback.py               # profile update logic
-│   ├── logging_utils.py          # structured logging
-│   └── mcp_tools.py               # optional MCP delivery integration
+│   ├── main.py                    # FastAPI entrypoint, wires both routers
+│   ├── models.py                   # SQLAlchemy: Advertiser, Campaign (shared)
+│   ├── schemas.py                   # Pydantic schemas (shared, see its module docstring)
+│   ├── policy/
+│   │   └── ad_policy.md              # company ad policy, served via MCP
+│   ├── core/                         # shared infrastructure
+│   │   ├── config.py                  # env-backed Settings
+│   │   ├── db.py                      # SQLAlchemy engine/session
+│   │   ├── queue.py                   # Redis connection + RQ queue
+│   │   ├── logging_utils.py           # structured JSON logging
+│   │   └── embeddings.py              # OpenAI embeddings client
+│   ├── serving/                      # recommend an ad to a user
+│   │   ├── retrieval.py               # Pinecone query + indexing logic
+│   │   ├── ranking.py                 # LLM re-ranking (OpenAI Responses API)
+│   │   ├── guardrails.py              # brand-safety filtering
+│   │   └── feedback.py                # profile-vector update logic
+│   └── campaigns/                    # advertiser posts a campaign
+│       ├── api.py                     # POST/GET /campaigns, /moderate
+│       ├── policy_review.py           # LangChain + MCP policy review agent
+│       └── review_jobs.py             # RQ job: run review, persist outcome
+├── mcp_servers/
+│   └── ad_policy_server.py         # MCP resource server for the ad policy doc
+├── alembic/                        # DB migrations
 ├── data/
-│   └── generate_personas.py      # synthetic user generation
+│   └── generate_personas.py        # synthetic user generation
 ├── tests/
-│   ├── test_retrieval.py
-│   ├── test_ranking.py
-│   └── test_guardrails.py
 ├── scripts/
 │   └── simulate_feedback_rounds.py   # runs multi-round CTR demo
 ├── Dockerfile

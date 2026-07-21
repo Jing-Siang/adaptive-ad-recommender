@@ -8,9 +8,9 @@ from functools import lru_cache
 from openai import OpenAI
 from pydantic import BaseModel
 
-from app.config import settings
-from app.embeddings import embed_query
-from app.retrieval import get_index
+from app.core.config import settings
+from app.core.embeddings import embed_query
+from app.serving.retrieval import get_index
 
 
 class Persona(BaseModel):

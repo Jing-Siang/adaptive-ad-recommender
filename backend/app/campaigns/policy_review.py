@@ -5,10 +5,10 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-from app.config import settings
+from app.core.config import settings
 from app.schemas import ReviewDecision
 
-AD_POLICY_SERVER_PATH = Path(__file__).parent.parent / "mcp_servers" / "ad_policy_server.py"
+AD_POLICY_SERVER_PATH = Path(__file__).parent.parent.parent / "mcp_servers" / "ad_policy_server.py"
 
 _SYSTEM_PROMPT = """You are an ad-policy reviewer. You will be given the company's ad policy \
 and a submitted campaign's creative. Decide whether it should be approved, rejected, or needs \

@@ -3,7 +3,7 @@ from datetime import date, datetime
 from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base
+from app.core.db import Base
 
 # Valid values for Campaign.status, enforced at the Pydantic layer (see schemas.py),
 # not as a DB-level enum, so adding a new status doesn't require a migration.
