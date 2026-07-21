@@ -3,8 +3,8 @@ import pytest
 from app.guardrails import check_guardrails
 from app.schemas import Ad
 
-ALCOHOL_AD = Ad(ad_id="ad-1", title="Craft beer club", description="Monthly beer subscription", category="alcohol")
-HARDWARE_AD = Ad(ad_id="ad-2", title="Drill set", description="Cordless drill kit", category="hardware")
+ALCOHOL_AD = Ad(ad_id="ad-1", headline="Craft beer club", description="Monthly beer subscription", category="alcohol")
+HARDWARE_AD = Ad(ad_id="ad-2", headline="Drill set", description="Cordless drill kit", category="hardware")
 
 
 @pytest.mark.parametrize(

@@ -132,7 +132,6 @@ ad-recommendation-engine/
 │   ├── logging_utils.py          # structured logging
 │   └── mcp_tools.py               # optional MCP delivery integration
 ├── data/
-│   ├── load_catalog.py           # ingest + embed ad inventory
 │   └── generate_personas.py      # synthetic user generation
 ├── tests/
 │   ├── test_retrieval.py

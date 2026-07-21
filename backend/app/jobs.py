@@ -2,11 +2,10 @@ import asyncio
 from datetime import UTC, datetime
 
 from app.db import SessionLocal
-from app.embeddings import embed_ads
 from app.logging_utils import log_event
 from app.models import Campaign
 from app.policy_review import review_campaign
-from app.retrieval import get_index
+from app.retrieval import index_campaign
 
 REVIEWED_BY_AGENT = "ai_policy_agent"
 
@@ -53,29 +52,7 @@ def review_campaign_job(campaign_id: int) -> None:
         )
 
         if decision.outcome == "approved":
-            _index_campaign(campaign)
+            index_campaign(campaign)
+            log_event("campaign_indexed", campaign_id=campaign_id)
     finally:
         db.close()
-
-
-def _index_campaign(campaign: Campaign) -> None:
-    text = f"{campaign.headline}. {campaign.description}. Category: {campaign.category}"
-    vector = embed_ads([text])[0]
-    index = get_index()
-    index.upsert(
-        vectors=[
-            {
-                "id": str(campaign.id),
-                "values": vector,
-                "metadata": {
-                    "headline": campaign.headline,
-                    "description": campaign.description,
-                    "category": campaign.category,
-                    "campaign_id": campaign.id,
-                    "status": campaign.status,
-                },
-            }
-        ],
-        namespace="ads",
-    )
-    log_event("campaign_indexed", campaign_id=campaign.id)

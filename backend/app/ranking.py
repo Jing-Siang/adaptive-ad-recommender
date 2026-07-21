@@ -20,7 +20,7 @@ rather than surface-level topic similarity, and score each candidate's relevance
 @retry(stop=stop_after_attempt(4), wait=wait_random_exponential(multiplier=1, max=20), reraise=True)
 def _call_llm(user_context: str, candidates: list[AdCandidate]) -> RankingResponse:
     candidates_text = "\n".join(
-        f"- id={c.ad_id} title={c.title!r} category={c.category} "
+        f"- id={c.ad_id} headline={c.headline!r} category={c.category} "
         f"similarity={c.similarity_score:.3f} description={c.description!r}"
         for c in candidates
     )

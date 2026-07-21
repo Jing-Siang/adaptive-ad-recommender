@@ -1,11 +1,12 @@
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Ad(BaseModel):
     ad_id: str
-    title: str
+    headline: str
     description: str
     category: str
     price: float | None = None
@@ -64,3 +65,42 @@ class ReviewDecision(BaseModel):
         description="Final excluded_categories for the campaign — include any "
         "policy-required exclusions the submission was missing.",
     )
+
+
+class CampaignCreateRequest(BaseModel):
+    advertiser_name: str
+    headline: str
+    description: str
+    category: str
+    objective: str
+    budget_total: float = Field(gt=0)
+    start_date: date
+    end_date: date
+    excluded_categories: list[str] = Field(default_factory=list)
+
+
+class CampaignResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    advertiser_id: int
+    headline: str
+    description: str
+    category: str
+    objective: str
+    budget_total: float
+    budget_spent: float
+    start_date: date
+    end_date: date
+    excluded_categories: list[str]
+    status: str
+    review_reason: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+
+
+class ModerationRequest(BaseModel):
+    outcome: Literal["approved", "rejected"]
+    reason: str
+    reviewed_by: str

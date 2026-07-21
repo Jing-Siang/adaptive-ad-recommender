@@ -6,7 +6,7 @@ from app.ranking import rerank
 from app.schemas import AdCandidate, RankedAd, RankingResponse
 
 CANDIDATE = AdCandidate(
-    ad_id="ad-1", title="Plumber hotline", description="24/7 emergency plumbing", category="services", similarity_score=0.88
+    ad_id="ad-1", headline="Plumber hotline", description="24/7 emergency plumbing", category="services", similarity_score=0.88
 )
 
 

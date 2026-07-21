@@ -12,7 +12,7 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(mock_embed_query, moc
             {
                 "id": "ad-1",
                 "score": 0.92,
-                "metadata": {"title": "Leaky faucet repair kit", "description": "Fix drips fast", "category": "home_repair", "price": 19.99},
+                "metadata": {"headline": "Leaky faucet repair kit", "description": "Fix drips fast", "category": "home_repair", "price": 19.99},
             }
         ]
     }

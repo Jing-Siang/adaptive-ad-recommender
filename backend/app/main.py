@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.campaigns_api import router as campaigns_router
 from app.config import settings
 from app.guardrails import check_guardrails
 from app.logging_utils import log_duration, log_event
@@ -21,6 +22,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(campaigns_router)
 
 
 @app.get("/health")
