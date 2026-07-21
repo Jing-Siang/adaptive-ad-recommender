@@ -8,7 +8,7 @@ from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
 from app.models import Advertiser, Campaign
 from app.core.queue import campaign_review_queue
-from app.serving.retrieval import index_campaign
+from app.campaigns.indexing import index_campaign
 from app.schemas import CampaignCreateRequest, CampaignResponse, ModerationRequest
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])

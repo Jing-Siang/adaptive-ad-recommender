@@ -5,7 +5,7 @@ from app.core.db import SessionLocal
 from app.core.logging_utils import log_event
 from app.models import Campaign
 from app.campaigns.policy_review import review_campaign
-from app.serving.retrieval import index_campaign
+from app.campaigns.indexing import index_campaign
 
 REVIEWED_BY_AGENT = "ai_policy_agent"
 

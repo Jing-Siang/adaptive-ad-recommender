@@ -2,9 +2,9 @@ import numpy as np
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from app.core.vector_store import fetch_vector, upsert_vector
 from app.models import Campaign
 from app.schemas import FeedbackEvent
-from app.serving.retrieval import fetch_vector, upsert_user_vector
 
 # How strongly a single outcome nudges the profile vector toward/away from an ad.
 LEARNING_RATE = {"click": 0.15, "conversion": 0.30, "no_click": -0.05}
@@ -58,8 +58,11 @@ def record_feedback(db: Session, event: FeedbackEvent) -> list[float]:
 
     profile_vector = fetch_vector(event.user_id, namespace="users") or ad_vector
     new_vector = update_profile_vector(profile_vector, ad_vector, event.outcome)
-    upsert_user_vector(
-        event.user_id, new_vector, metadata={"last_outcome": event.outcome, "last_ad_id": event.ad_id}
+    upsert_vector(
+        event.user_id,
+        new_vector,
+        metadata={"last_outcome": event.outcome, "last_ad_id": event.ad_id},
+        namespace="users",
     )
 
     _debit_campaign_budget(db, int(event.ad_id), event.outcome)

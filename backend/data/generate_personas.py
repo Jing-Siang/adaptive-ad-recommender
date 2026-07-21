@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.embeddings import embed_query
-from app.serving.retrieval import get_index
+from app.core.vector_store import get_index
 
 
 class Persona(BaseModel):
