@@ -1,10 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
 from app.campaigns.api import router as campaigns_router
 from app.core.config import settings
-from app.serving.guardrails import check_guardrails
+from app.core.db import get_db
 from app.core.logging_utils import log_duration, log_event
+from app.serving.feedback import record_feedback
+from app.serving.guardrails import check_guardrails
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
 from app.schemas import (
@@ -32,9 +35,9 @@ def health() -> dict:
 
 
 @app.post("/recommend", response_model=RecommendationTrace)
-def recommend(request: RecommendationRequest) -> RecommendationTrace:
+def recommend(request: RecommendationRequest, db: Session = Depends(get_db)) -> RecommendationTrace:
     with log_duration("recommend", user_id=request.user_id):
-        candidates = retrieve_candidates(request.user_id, top_k=request.top_k)
+        candidates = retrieve_candidates(db, request.user_id, top_k=request.top_k)
         if not candidates:
             raise HTTPException(status_code=404, detail="no candidates found for user")
 
@@ -70,6 +73,10 @@ def recommend(request: RecommendationRequest) -> RecommendationTrace:
 
 
 @app.post("/feedback")
-def feedback(event: FeedbackEvent) -> dict:
+def feedback(event: FeedbackEvent, db: Session = Depends(get_db)) -> dict:
     log_event("feedback_received", **event.model_dump())
+    try:
+        record_feedback(db, event)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "recorded"}

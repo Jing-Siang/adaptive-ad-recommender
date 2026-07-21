@@ -4,7 +4,9 @@ re-recommend, and prints CTR improving across rounds plus one example decision t
 import argparse
 import random
 
-from app.serving.feedback import update_profile_vector
+from app.core.db import SessionLocal
+from app.schemas import FeedbackEvent
+from app.serving.feedback import record_feedback
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
 
@@ -22,17 +24,26 @@ def simulate_click(ranked_ads, click_prob_top: float = 0.6) -> str | None:
 def run(user_id: str, rounds: int, top_k: int) -> None:
     ctr_history = []
     last_trace = None
+    db = SessionLocal()
 
-    for round_num in range(1, rounds + 1):
-        candidates = retrieve_candidates(user_id, top_k=top_k)
-        rankings = rerank(user_context=user_id, candidates=candidates)
-        ranked = sorted(rankings, key=lambda r: r.relevance_score, reverse=True)
+    try:
+        for round_num in range(1, rounds + 1):
+            candidates = retrieve_candidates(db, user_id, top_k=top_k)
+            rankings = rerank(user_context=user_id, candidates=candidates)
+            ranked = sorted(rankings, key=lambda r: r.relevance_score, reverse=True)
 
-        clicked_id = simulate_click(ranked)
-        ctr_history.append(1 if clicked_id else 0)
-        last_trace = {"round": round_num, "candidates": candidates, "rankings": ranked, "clicked": clicked_id}
+            clicked_id = simulate_click(ranked)
+            ctr_history.append(1 if clicked_id else 0)
+            last_trace = {"round": round_num, "candidates": candidates, "rankings": ranked, "clicked": clicked_id}
 
-        print(f"round {round_num}: served={ranked[0].ad_id if ranked else None} clicked={clicked_id}")
+            served_id = ranked[0].ad_id if ranked else None
+            if served_id:
+                outcome = "click" if clicked_id == served_id else "no_click"
+                record_feedback(db, FeedbackEvent(user_id=user_id, ad_id=served_id, outcome=outcome))
+
+            print(f"round {round_num}: served={served_id} clicked={clicked_id}")
+    finally:
+        db.close()
 
     window = 5
     rolling_ctr = [
