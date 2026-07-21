@@ -22,8 +22,8 @@ system runs and accumulates data over time.
 
 | Layer | Tool |
 |---|---|
-| LLM (reasoning, re-ranking, structured output) | **Claude API** (Anthropic) |
-| Embeddings (ad catalog + user profile vectors) | **Voyage AI** (`voyage-4-large` for indexing, `voyage-4-lite` for queries — same embedding space, no re-indexing needed) |
+| LLM (reasoning, re-ranking, structured output) | **OpenAI API** (`gpt-4o-mini`, Responses API with `text_format` for schema-enforced structured output) |
+| Embeddings (ad catalog + user profile vectors) | **OpenAI** (`text-embedding-3-small` — same model for indexing and queries, no re-indexing needed) |
 | Vector store | **Pinecone** |
 | Orchestration / agent loop | **LangChain** (with `langchain-mcp-adapters` if MCP tools are used) |
 | Tool delivery (optional) | **MCP server** for sending notifications (Slack/email) |
@@ -52,14 +52,13 @@ system runs and accumulates data over time.
 
 ### 1. Ad inventory embedding
 - Ingest the product catalog.
-- Embed each ad's text (title + description + category) with Voyage AI
-  (`voyage-4-large`).
+- Embed each ad's text (title + description + category) with OpenAI
+  (`text-embedding-3-small`).
 - Store vectors + metadata in Pinecone (namespace: `ads`).
 
 ### 2. User profile embedding
 - Generate synthetic user personas with an interest history (LLM-generated).
-- Embed a "rolling profile" representing the user's current interests
-  (`voyage-4-lite` for queries).
+- Embed a "rolling profile" representing the user's current interests.
 - Store/update in Pinecone (namespace: `users`) or keep in a lightweight DB
   and re-embed on update.
 
@@ -68,9 +67,9 @@ system runs and accumulates data over time.
   closest (cosine similarity) to the user's profile vector.
 - This is a pure vector-search step — no LLM call, keeps cost/latency low.
 
-### 4. LLM re-ranking (Claude)
-- Pass the top-K candidate ads + user context to Claude.
-- Claude reasons about *intent*, not just similarity (e.g., someone reading
+### 4. LLM re-ranking
+- Pass the top-K candidate ads + user context to the LLM.
+- It reasons about *intent*, not just similarity (e.g., someone reading
   about a leaky faucet wants a plumber ad *now*, not a general hardware
   store ad).
 - Require **structured output**: `{ad_id, relevance_score, justification}`
@@ -125,7 +124,7 @@ system runs and accumulates data over time.
 ad-recommendation-engine/
 ├── app/
 │   ├── main.py                 # FastAPI entrypoint
-│   ├── embeddings.py            # Voyage AI client + embedding helpers
+│   ├── embeddings.py            # OpenAI embeddings client + helpers
 │   ├── retrieval.py              # Pinecone query logic
 │   ├── ranking.py                # Claude re-ranking + Pydantic schemas
 │   ├── guardrails.py             # brand-safety filtering

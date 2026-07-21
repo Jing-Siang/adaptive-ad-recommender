@@ -1,6 +1,6 @@
 """Ingest a product dataset (e.g. Amazon Products on Kaggle) as a proxy ad catalog,
-embed each item's title + description + category with Voyage AI, and upsert into
-the Pinecone `ads` namespace."""
+embed each item's title + description + category, and upsert into the Pinecone
+`ads` namespace."""
 
 import argparse
 import csv

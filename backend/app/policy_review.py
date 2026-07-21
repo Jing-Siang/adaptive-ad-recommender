@@ -1,8 +1,8 @@
 import sys
 from pathlib import Path
 
-from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_openai import ChatOpenAI
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 from app.config import settings
@@ -36,9 +36,9 @@ async def fetch_ad_policy() -> str:
     return blobs[0].as_string()
 
 
-@retry(stop=stop_after_attempt(4), wait=wait_random_exponential(multiplier=1, max=20))
+@retry(stop=stop_after_attempt(4), wait=wait_random_exponential(multiplier=1, max=20), reraise=True)
 async def _call_reviewer(policy_text: str, campaign_text: str) -> ReviewDecision:
-    llm = ChatAnthropic(model=settings.claude_model, api_key=settings.anthropic_api_key)
+    llm = ChatOpenAI(model=settings.openai_chat_model, api_key=settings.openai_api_key)
     structured_llm = llm.with_structured_output(ReviewDecision)
     return await structured_llm.ainvoke(
         [
@@ -54,7 +54,7 @@ async def review_campaign(
     category: str,
     excluded_categories: list[str],
 ) -> ReviewDecision:
-    """Fetch the ad policy via MCP, ask Claude for a structured approve/reject/
+    """Fetch the ad policy via MCP, ask the LLM for a structured approve/reject/
     needs_review decision, validated against ReviewDecision before use."""
     policy_text = await fetch_ad_policy()
     campaign_text = (

@@ -1,50 +1,62 @@
-import json
-
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.ranking import rerank
-from app.schemas import AdCandidate
+from app.schemas import AdCandidate, RankedAd, RankingResponse
 
 CANDIDATE = AdCandidate(
     ad_id="ad-1", title="Plumber hotline", description="24/7 emergency plumbing", category="services", similarity_score=0.88
 )
 
 
-def _mock_message(text: str) -> MagicMock:
-    message = MagicMock()
-    message.content = [MagicMock(text=text)]
-    return message
+def _mock_parsed_response(ranking_response: RankingResponse) -> MagicMock:
+    response = MagicMock()
+    response.output_parsed = ranking_response
+    return response
 
 
-@patch("app.ranking._call_claude")
-def test_rerank_parses_valid_structured_output(mock_call_claude):
-    mock_call_claude.return_value = json.dumps(
-        {"rankings": [{"ad_id": "ad-1", "relevance_score": 0.95, "justification": "matches urgent intent"}]}
+@patch("app.ranking._get_client")
+def test_rerank_returns_parsed_rankings(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = _mock_parsed_response(
+        RankingResponse(rankings=[RankedAd(ad_id="ad-1", relevance_score=0.95, justification="matches urgent intent")])
     )
+    mock_get_client.return_value = mock_client
 
     rankings = rerank("user reading about a leaky faucet", [CANDIDATE])
 
     assert len(rankings) == 1
     assert rankings[0].ad_id == "ad-1"
     assert rankings[0].relevance_score == 0.95
+    _, kwargs = mock_client.responses.parse.call_args
+    assert kwargs["text_format"] is RankingResponse
 
 
-@patch("app.ranking._call_claude")
-def test_rerank_raises_after_repeated_invalid_output(mock_call_claude):
-    mock_call_claude.return_value = "not json at all"
+@patch("app.ranking._get_client")
+def test_rerank_retries_on_transient_error_then_succeeds(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.responses.parse.side_effect = [
+        RuntimeError("transient API error"),
+        _mock_parsed_response(
+            RankingResponse(rankings=[RankedAd(ad_id="ad-1", relevance_score=0.7, justification="ok")])
+        ),
+    ]
+    mock_get_client.return_value = mock_client
 
-    with pytest.raises(ValueError):
+    rankings = rerank("some context", [CANDIDATE])
+
+    assert rankings[0].relevance_score == 0.7
+    assert mock_client.responses.parse.call_count == 2
+
+
+@patch("app.ranking._get_client")
+def test_rerank_raises_after_repeated_failures(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.responses.parse.side_effect = RuntimeError("persistent API error")
+    mock_get_client.return_value = mock_client
+
+    with pytest.raises(RuntimeError):
         rerank("some context", [CANDIDATE])
 
-    assert mock_call_claude.call_count == 3
-
-
-@patch("app.ranking._call_claude")
-def test_rerank_rejects_out_of_range_relevance_score(mock_call_claude):
-    mock_call_claude.return_value = json.dumps(
-        {"rankings": [{"ad_id": "ad-1", "relevance_score": 1.5, "justification": "bad score"}]}
-    )
-
-    with pytest.raises(ValueError):
-        rerank("some context", [CANDIDATE])
+    assert mock_client.responses.parse.call_count == 4

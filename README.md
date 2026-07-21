@@ -12,8 +12,8 @@ loop that measurably improves CTR across simulated rounds. See
 
 | Layer | Tool |
 |---|---|
-| LLM (reasoning, re-ranking, structured output) | Claude API (Anthropic) |
-| Embeddings | Voyage AI (`voyage-4-large` index / `voyage-4-lite` query) |
+| LLM (reasoning, re-ranking, structured output) | OpenAI API (`gpt-4o-mini`, Responses API) |
+| Embeddings | OpenAI (`text-embedding-3-small`) |
 | Vector store | Pinecone |
 | Backend | FastAPI |
 | Frontend | React + Vite + TypeScript |
@@ -45,7 +45,7 @@ adaptive-ad-recommender/
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in ANTHROPIC_API_KEY, VOYAGE_API_KEY, PINECONE_API_KEY
+cp .env.example .env   # fill in OPENAI_API_KEY, PINECONE_API_KEY
 uvicorn app.main:app --reload
 ```
 
