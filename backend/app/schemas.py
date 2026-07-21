@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -52,3 +54,13 @@ class FeedbackEvent(BaseModel):
     user_id: str
     ad_id: str
     outcome: str = Field(pattern="^(click|no_click|conversion)$")
+
+
+class ReviewDecision(BaseModel):
+    outcome: Literal["approved", "rejected", "needs_review"]
+    reason: str
+    excluded_categories: list[str] = Field(
+        default_factory=list,
+        description="Final excluded_categories for the campaign — include any "
+        "policy-required exclusions the submission was missing.",
+    )
