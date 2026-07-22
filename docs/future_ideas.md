@@ -23,9 +23,18 @@ Open questions before building this: what specifically counts as
 prompt), and whether to wire up a real Slack webhook or start with a
 logged stand-in.
 
+**Concrete trigger identified (2026-07-23)**: the feed's "report" reaction
+(see `docs/next_phase_plan.md`) gives this a real, motivated starting
+point. That phase ships a simple version first -- a hardcoded report-count
+threshold auto-flips a campaign to `needs_review`. The natural upgrade is
+replacing that hardcoded number with this agent: it would look at the
+report pattern (count, rate vs. impressions, maybe guardrail-block
+history) and decide whether/how to escalate, with a reason -- a genuine
+"custom tool the model decides to call" case (the tool being "flip this
+campaign to needs_review", which our code has to actually execute).
+
 ## Frontend dashboard
 
-Recommendation dashboard, decision-trace viewer, CTR chart, and a
-moderator-queue page. Tracked as a known gap in README's Status section —
-listed here too since it's the same category of "designed for, not yet
-built."
+No longer just an idea — actively planned, see `docs/next_phase_plan.md`
+for the full design (four views: onboarding chat + feed, performance
+dashboard, campaign submission, moderator queue).
