@@ -1,8 +1,9 @@
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 from app.core.config import settings
@@ -36,9 +37,16 @@ summary -- not your conclusion, not the word "None" as text. Set it to an actual
 entirely if you did not search because there was nothing specific enough to look up."""
 
 
+@lru_cache
+def _get_client() -> AsyncOpenAI:
+    return AsyncOpenAI(api_key=settings.openai_api_key)
+
+
 async def fetch_ad_policy() -> str:
     """Fetch the current ad-policy document via the ad-policy MCP resource server,
-    spawned fresh as a subprocess for this call."""
+    spawned fresh as a subprocess for this call. The one place LangChain earns its
+    keep here -- an MCP client, not an agent loop (see docs/future_ideas.md for
+    where a real agent loop would actually fit in this project)."""
     client = MultiServerMCPClient(
         {
             "ad_policy": {
@@ -54,21 +62,18 @@ async def fetch_ad_policy() -> str:
 
 @retry(stop=stop_after_attempt(4), wait=wait_random_exponential(multiplier=1, max=20), reraise=True)
 async def _call_reviewer(policy_text: str, campaign_text: str) -> ReviewDecision:
-    # use_responses_api + bind_tools(..., response_format=...) is the one LangChain
-    # path that actually combines an OpenAI hosted tool (web_search) with schema-
-    # enforced output in a single call -- .with_structured_output() silently drops
-    # the bound tool instead of erroring, so it looked fine until tested live.
-    # Verified reliable across 8 live calls (with and without search firing) before
-    # relying on it here: additional_kwargs["parsed"] was always present/correctly typed.
-    llm = ChatOpenAI(model=settings.openai_chat_model, api_key=settings.openai_api_key, use_responses_api=True)
-    bound = llm.bind_tools([{"type": "web_search"}], response_format=ReviewDecision)
-    result = await bound.ainvoke(
-        [
-            ("system", _SYSTEM_PROMPT),
-            ("user", f"Ad policy:\n{policy_text}\n\nCampaign to review:\n{campaign_text}"),
-        ]
+    # Raw Responses API, matching ranking.py -- no LangChain needed here. web_search
+    # is a hosted tool OpenAI runs server-side in the same call; the model deciding
+    # whether to invoke it, plus schema-enforced output, both work natively via
+    # tools= + text_format= together (verified live before relying on it).
+    response = await _get_client().responses.parse(
+        model=settings.openai_chat_model,
+        tools=[{"type": "web_search"}],
+        instructions=_SYSTEM_PROMPT,
+        input=f"Ad policy:\n{policy_text}\n\nCampaign to review:\n{campaign_text}",
+        text_format=ReviewDecision,
     )
-    return result.additional_kwargs["parsed"]
+    return response.output_parsed
 
 
 async def review_campaign(

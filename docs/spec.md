@@ -30,8 +30,7 @@ only exist because the system runs and accumulates data over time.
 | Vector store | **Pinecone** (serverless) — embeddings only, never the source of truth for status/budget |
 | Relational store | **Postgres** via **SQLAlchemy** + **Alembic** migrations — advertisers, campaigns, budget, review outcome |
 | Async job queue | **Redis** + **RQ** — campaign policy review runs off the request path |
-| Agent framework | **LangChain** (`langchain-openai`) — used specifically for the policy review agent's structured output |
-| Tool integration | **MCP** (`langchain-mcp-adapters`) — the ad-policy document is served as an MCP resource that the review agent fetches |
+| Tool integration | **MCP** (`langchain-mcp-adapters`) — the ad-policy document is served as an MCP resource the review agent fetches; the LLM call itself uses the OpenAI SDK directly (see docs/future_ideas.md for where an actual LangChain agent loop would fit in this project) |
 | API layer | **FastAPI** |
 | Reliability | `tenacity` (retries/backoff, `reraise=True` so callers see the real exception), Pydantic (structured output validation), atomic SQL updates for budget (no read-modify-write) |
 | Observability | Structured (JSON) logging of every recommendation and review decision |
@@ -68,11 +67,16 @@ only exist because the system runs and accumulates data over time.
    company ad-policy document via an **MCP resource** (`mcp_servers/
    ad_policy_server.py`, spawned as a short-lived stdio subprocess — the only
    client is this agent, not a human, so MCP resources rather than
-   human-facing tools is the right fit here), then asks the LLM
-   (`langchain-openai`'s `ChatOpenAI` + `.with_structured_output`) for a
-   validated three-way decision: `approved` / `rejected` / `needs_review`,
-   with a reason and (if the campaign's category requires context
-   exclusions per policy, e.g. alcohol) the exclusions to apply.
+   human-facing tools is the right fit here; this is the one piece of the
+   review agent that uses LangChain, via `langchain-mcp-adapters` — see
+   "Providers / Stack" below for why the LLM call itself doesn't). It then
+   asks the LLM directly (OpenAI's Responses API, `text_format=
+   ReviewDecision`, with the hosted `web_search` tool available for claims
+   needing substantiation) for a validated three-way decision: `approved` /
+   `rejected` / `needs_review`, with a reason, optional web-search-backed
+   `research_notes` for a human moderator, and (if the campaign's category
+   requires context exclusions per policy, e.g. alcohol) the exclusions to
+   apply.
 3. **Outcome**:
    - `approved` → creative gets embedded (`text-embedding-3-small`) and
      upserted into Pinecone (`campaigns/indexing.py`); campaign status →
