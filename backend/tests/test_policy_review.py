@@ -63,3 +63,44 @@ async def test_review_campaign_needs_review(mock_fetch_policy, mock_call_reviewe
     )
 
     assert decision.outcome == "needs_review"
+
+
+@pytest.mark.asyncio
+@patch("app.campaigns.policy_review._call_reviewer", new_callable=AsyncMock)
+@patch("app.campaigns.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
+async def test_review_campaign_includes_research_notes_for_moderator(mock_fetch_policy, mock_call_reviewer):
+    mock_call_reviewer.return_value = ReviewDecision(
+        outcome="needs_review",
+        reason="claim references a specific named product, could not confirm it exists",
+        excluded_categories=[],
+        research_notes="Searched for 'NovaCharge Battery Co' -- no independent lab results found.",
+    )
+
+    decision = await review_campaign(
+        headline="NovaCharge Battery Co",
+        description="Verified by independent lab testing, delivers 500 mile range",
+        category="automotive",
+        excluded_categories=[],
+    )
+
+    assert decision.outcome == "needs_review"
+    assert decision.research_notes is not None
+    assert "NovaCharge" in decision.research_notes
+
+
+@pytest.mark.asyncio
+@patch("app.campaigns.policy_review._call_reviewer", new_callable=AsyncMock)
+@patch("app.campaigns.policy_review.fetch_ad_policy", new_callable=AsyncMock, return_value="policy text")
+async def test_review_campaign_research_notes_defaults_to_none(mock_fetch_policy, mock_call_reviewer):
+    mock_call_reviewer.return_value = ReviewDecision(
+        outcome="approved", reason="ordinary product ad, nothing to look up", excluded_categories=[]
+    )
+
+    decision = await review_campaign(
+        headline="Cordless Drill Kit",
+        description="18V drill with two batteries",
+        category="hardware",
+        excluded_categories=[],
+    )
+
+    assert decision.research_notes is None

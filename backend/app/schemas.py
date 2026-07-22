@@ -121,6 +121,12 @@ class ReviewDecision(BaseModel):
         description="Final excluded_categories for the campaign — include any "
         "policy-required exclusions the submission was missing.",
     )
+    research_notes: str | None = Field(
+        default=None,
+        description="Web search findings relevant to the decision (e.g. verifying a "
+        "health/financial claim) -- for a human moderator's benefit on needs_review "
+        "cases, not something the outcome itself should be based solely on.",
+    )
 
 
 class CampaignCreateRequest(BaseModel):

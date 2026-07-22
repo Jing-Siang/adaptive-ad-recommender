@@ -15,9 +15,25 @@ and a submitted campaign's creative. Decide whether it should be approved, rejec
 a human moderator, following the policy's decision guidance exactly — prefer needs_review over \
 guessing when genuinely ambiguous.
 
+Always fill in `reason` with a substantive explanation of your decision -- never leave it empty,
+even for a clear-cut approval. `reason` is your own conclusion, in your own words -- it must not
+contain search findings or citations; those belong only in `research_notes` (see below).
+
 If the campaign's category requires context exclusions per the policy and the submission is \
 missing them, add the required entries to excluded_categories yourself and approve — do not \
-reject solely for a missing exclusion list."""
+reject solely for a missing exclusion list.
+
+You have a web search tool. Your own outcome decision should still be driven primarily by the \
+policy document, not by search results alone -- treat anything found on the web as unverified, \
+not a substitute for the policy. But whenever the creative makes a claim that requires \
+substantiation per the policy (health, financial) AND references something specific and checkable \
+(a named product, company, study, or statistic) -- actually use the search tool to try to verify \
+it before deciding, rather than assuming it can't be checked.
+
+`research_notes` is a separate field from `reason`, specifically for a human moderator to read:
+if you searched, put what you found there (with sources), in your own words, as a short factual
+summary -- not your conclusion, not the word "None" as text. Set it to an actual null/omit it
+entirely if you did not search because there was nothing specific enough to look up."""
 
 
 async def fetch_ad_policy() -> str:
@@ -38,14 +54,21 @@ async def fetch_ad_policy() -> str:
 
 @retry(stop=stop_after_attempt(4), wait=wait_random_exponential(multiplier=1, max=20), reraise=True)
 async def _call_reviewer(policy_text: str, campaign_text: str) -> ReviewDecision:
-    llm = ChatOpenAI(model=settings.openai_chat_model, api_key=settings.openai_api_key)
-    structured_llm = llm.with_structured_output(ReviewDecision)
-    return await structured_llm.ainvoke(
+    # use_responses_api + bind_tools(..., response_format=...) is the one LangChain
+    # path that actually combines an OpenAI hosted tool (web_search) with schema-
+    # enforced output in a single call -- .with_structured_output() silently drops
+    # the bound tool instead of erroring, so it looked fine until tested live.
+    # Verified reliable across 8 live calls (with and without search firing) before
+    # relying on it here: additional_kwargs["parsed"] was always present/correctly typed.
+    llm = ChatOpenAI(model=settings.openai_chat_model, api_key=settings.openai_api_key, use_responses_api=True)
+    bound = llm.bind_tools([{"type": "web_search"}], response_format=ReviewDecision)
+    result = await bound.ainvoke(
         [
             ("system", _SYSTEM_PROMPT),
             ("user", f"Ad policy:\n{policy_text}\n\nCampaign to review:\n{campaign_text}"),
         ]
     )
+    return result.additional_kwargs["parsed"]
 
 
 async def review_campaign(
@@ -55,7 +78,8 @@ async def review_campaign(
     excluded_categories: list[str],
 ) -> ReviewDecision:
     """Fetch the ad policy via MCP, ask the LLM for a structured approve/reject/
-    needs_review decision, validated against ReviewDecision before use."""
+    needs_review decision (with optional web-search-backed research notes for a
+    human moderator), validated against ReviewDecision before use."""
     policy_text = await fetch_ad_policy()
     campaign_text = (
         f"Headline: {headline}\n"
