@@ -37,7 +37,10 @@ def health() -> dict:
 @app.post("/recommend", response_model=RecommendationTrace)
 def recommend(request: RecommendationRequest, db: Session = Depends(get_db)) -> RecommendationTrace:
     with log_duration("recommend", user_id=request.user_id):
-        candidates = retrieve_candidates(db, request.user_id, top_k=request.top_k)
+        try:
+            candidates = retrieve_candidates(db, request.user_id, top_k=request.top_k)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         if not candidates:
             raise HTTPException(status_code=404, detail="no candidates found for user")
 

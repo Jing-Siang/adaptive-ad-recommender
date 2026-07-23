@@ -2,8 +2,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.core.embeddings import embed_query
-from app.core.vector_store import get_index
+from app.core.vector_store import fetch_vector, get_index
 from app.models import Campaign
 from app.schemas import AdCandidate
 
@@ -33,11 +32,19 @@ def _eligible_campaign_ids(db: Session, candidate_ids: list[int]) -> set[int]:
     return {row.id for row in rows}
 
 
-def retrieve_candidates(db: Session, user_profile_text: str, top_k: int = 10) -> list[AdCandidate]:
-    """Cheap first-pass retrieval: embed the user profile, query the `ads` namespace
-    for the nearest ads by cosine similarity, then keep only campaigns still
-    eligible to serve (active, budgeted, in-date). No LLM call."""
-    vector = embed_query([user_profile_text])[0]
+def retrieve_candidates(db: Session, user_id: str, top_k: int = 10) -> list[AdCandidate]:
+    """Cheap first-pass retrieval: use the user's stored profile vector, query
+    the `ads` namespace for the nearest ads by cosine similarity, then keep
+    only campaigns still eligible to serve (active, budgeted, in-date). No
+    LLM call.
+
+    Requires a profile to already exist -- onboarding (POST /users, then the
+    checkpoint flow) always creates one before a user ever reaches /recommend,
+    so a missing profile here means recommend was called before onboarding
+    finished, not a legitimate cold-start case to paper over."""
+    vector = fetch_vector(user_id, namespace="users")
+    if vector is None:
+        raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
     index = get_index()
     result = index.query(
         vector=vector,

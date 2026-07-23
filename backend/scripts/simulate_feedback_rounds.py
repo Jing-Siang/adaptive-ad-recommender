@@ -5,10 +5,21 @@ import argparse
 import random
 
 from app.core.db import SessionLocal
+from app.core.embeddings import embed_query
+from app.core.vector_store import fetch_vector, upsert_vector
 from app.schemas import FeedbackEvent
 from app.serving.feedback import record_feedback
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
+
+
+def _ensure_profile(user_id: str, interest_text: str) -> None:
+    """retrieve_candidates now requires a profile to already exist (normally
+    created by onboarding) -- seed one here so this CLI script keeps working
+    standalone."""
+    if fetch_vector(user_id, namespace="users") is None:
+        vector = embed_query([interest_text])[0]
+        upsert_vector(user_id, vector, metadata={"interest_summary": interest_text}, namespace="users")
 
 
 def simulate_click(ranked_ads, click_prob_top: float = 0.6) -> str | None:
@@ -21,9 +32,10 @@ def simulate_click(ranked_ads, click_prob_top: float = 0.6) -> str | None:
     return None
 
 
-def run(user_id: str, rounds: int, top_k: int) -> None:
+def run(user_id: str, rounds: int, top_k: int, interest_text: str) -> None:
     ctr_history = []
     last_trace = None
+    _ensure_profile(user_id, interest_text)
     db = SessionLocal()
 
     try:
@@ -60,6 +72,11 @@ if __name__ == "__main__":
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument(
+        "--interest",
+        default="general shopper",
+        help="Cold-start interest text used to seed a profile if none exists yet",
+    )
     args = parser.parse_args()
 
-    run(args.user_id, args.rounds, args.top_k)
+    run(args.user_id, args.rounds, args.top_k, args.interest)
