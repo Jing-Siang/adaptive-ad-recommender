@@ -181,6 +181,59 @@ class DoNotShowRequest(BaseModel):
     ad_id: str
 
 
+class PerformanceTotals(BaseModel):
+    """Aggregate metrics across all events, all campaigns -- this dashboard
+    is a window into the engine, not any one user's feed, so nothing here is
+    scoped to a user_id."""
+
+    impressions: int
+    likes: int
+    dislikes: int
+    conversions: int  # "interested" reactions -- the real CTR-equivalent metric
+    reports: int
+    ctr: float  # conversions / impressions
+    engagement_rate: float  # likes / impressions
+    dislike_rate: float  # dislikes / impressions
+    total_spend: float
+    avg_cpa: float | None  # total_spend / conversions; None if there are no conversions yet
+
+
+class PerformanceTrendPoint(BaseModel):
+    """One day's impressions/conversions/CTR -- the "is it learning" trend
+    line, bucketed by day since a demo doesn't have enough volume for a
+    finer-grained window to be meaningful."""
+
+    date: date
+    impressions: int
+    conversions: int
+    ctr: float
+
+
+class CampaignPerformance(BaseModel):
+    """Per-campaign row for the breakdown table -- standard in real ad
+    dashboards (Google Ads, Meta Ads Manager), and also how a report problem
+    surfaces to whoever's running the system."""
+
+    campaign_id: int
+    headline: str
+    status: str
+    impressions: int
+    likes: int
+    dislikes: int
+    conversions: int
+    reports: int
+    ctr: float
+    spend: float
+
+
+class PerformanceResponse(BaseModel):
+    """Response body for GET /performance."""
+
+    totals: PerformanceTotals
+    trend: list[PerformanceTrendPoint]
+    campaigns: list[CampaignPerformance]
+
+
 # --------------------------------------------------------------------------
 # Campaigns: an advertiser submitting a campaign for review (app/campaigns/)
 # --------------------------------------------------------------------------
