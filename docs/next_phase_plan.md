@@ -227,7 +227,7 @@ Backend:
       (raises if missing, no silent fallback -- see above)
 - [x] `POST /users`, `GET /users/{user_id}` (profile lives in Pinecone's
       `users` namespace only, no Postgres table)
-- [ ] Event log table (impression/like/dislike/interested/report) +
+- [x] Event log table (impression/like/dislike/interested/report) +
       migration
 - [ ] Batch-recommend endpoint (ranked list of N, not just the top one)
 - [ ] Impression-logging endpoint (lightweight, client-triggered)
