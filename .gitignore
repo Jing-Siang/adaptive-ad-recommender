@@ -32,5 +32,5 @@ Thumbs.db
 backend/data/*.csv
 backend/data/*.json
 !backend/data/generate_personas.py
-!backend/data/load_catalog.py
+!backend/data/seed_campaigns.json
 backend/logs/
