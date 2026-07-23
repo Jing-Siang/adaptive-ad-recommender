@@ -245,8 +245,8 @@ Backend:
       straight from the `events` table (`REPORT_THRESHOLD = 3`), no
       separate counter column; escalation agent left as a future upgrade
       per `docs/future_ideas.md` (confirmed, not pulled into this phase)
-- [ ] Performance aggregation endpoint (CTR/engagement/dislike rate,
-      spend, CPA, rolling trend, per-campaign breakdown)
+- [x] Performance aggregation endpoint (CTR/engagement/dislike rate,
+      spend, CPA, rolling trend, per-campaign breakdown) -- `GET /performance`
 - [ ] Streaming onboarding-chat endpoint (two calls per turn, as above)
 - [ ] Onboarding checkpoint logic: rough interest_summary every turn,
       retrieve + return candidates for reactable cards, cap at 3 rounds
