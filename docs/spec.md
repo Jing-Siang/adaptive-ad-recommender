@@ -34,7 +34,7 @@ only exist because the system runs and accumulates data over time.
 | API layer | **FastAPI** |
 | Reliability | `tenacity` (retries/backoff, `reraise=True` so callers see the real exception), Pydantic (structured output validation), atomic SQL updates for budget (no read-modify-write) |
 | Observability | Structured (JSON) logging of every recommendation and review decision |
-| Testing | `pytest` — 60 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
+| Testing | `pytest` — 66 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
 | Deployment | Docker Compose (postgres, redis, backend, worker, frontend) → Railway or Render for production |
 
 ---
@@ -159,6 +159,12 @@ only exist because the system runs and accumulates data over time.
    - `POST /users/{user_id}/do-not-show` — a permanent per-user exclusion,
      not a learning signal: no profile nudge, no event logged, just an
      addition to that user's blocklist (checked in step 1).
+6. **Performance dashboard** (`GET /performance`, `serving/performance_api.py`)
+   — aggregates the `events` table (plus `Campaign.budget_spent`, already
+   the source of truth for spend) into overall CTR/engagement-rate/
+   dislike-rate/spend/avg-CPA, a daily CTR trend line, and a per-campaign
+   breakdown table. Aggregate across all activity, not scoped to a
+   `user_id` — this is a window into the engine, not one person's feed.
 
 ### Explainability / logging
 
@@ -213,6 +219,7 @@ backend/
 │   │   ├── api.py                     # POST /recommend, /recommend/batch
 │   │   ├── users.py                   # POST/GET /users, do-not-show (blocklist)
 │   │   ├── events_api.py              # impression/reaction/report endpoints
+│   │   ├── performance_api.py          # GET /performance dashboard aggregation
 │   │   ├── retrieval.py               # Pinecone query + eligibility + blocklist filter
 │   │   ├── ranking.py                 # LLM re-ranking (OpenAI Responses API)
 │   │   ├── guardrails.py              # brand-safety filtering (serve-time context)
@@ -227,7 +234,7 @@ backend/
 ├── alembic/                        # DB migrations
 ├── data/
 │   └── generate_personas.py        # synthetic user generation
-├── tests/                          # 60 tests — see README for how to run
+├── tests/                          # 66 tests — see README for how to run
 ├── scripts/
 │   └── simulate_feedback_rounds.py   # runs multi-round CTR demo
 ├── Dockerfile
