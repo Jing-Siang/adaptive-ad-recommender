@@ -9,6 +9,8 @@ client = TestClient(app)
 
 
 def test_log_impression_inserts_event_row(db, campaign):
+    """POST /events/impression is a pure DB insert -- no Pinecone/LLM call
+    involved, so nothing needs mocking here."""
     resp = client.post("/events/impression", json={"user_id": "pytest-user", "ad_id": str(campaign.id)})
 
     assert resp.status_code == 201
@@ -22,6 +24,8 @@ def test_log_impression_inserts_event_row(db, campaign):
 
 @patch("app.serving.events_api.record_feedback")
 def test_react_inserts_event_row_and_calls_record_feedback(mock_record_feedback, db, campaign):
+    """A like reaction both logs an events row and delegates the profile-
+    nudge/budget-debit side to record_feedback with the right plain args."""
     resp = client.post(
         "/events/reaction",
         json={"user_id": "pytest-user", "ad_id": str(campaign.id), "reaction": "like"},
@@ -39,6 +43,8 @@ def test_react_inserts_event_row_and_calls_record_feedback(mock_record_feedback,
 
 @patch("app.serving.events_api.record_feedback", side_effect=ValueError("no profile found for user 'x'"))
 def test_react_returns_404_and_does_not_log_when_no_profile(mock_record_feedback, db, campaign):
+    """record_feedback's ValueError (no profile) surfaces as 404, and the
+    event row is never written since the reaction never actually succeeded."""
     resp = client.post(
         "/events/reaction",
         json={"user_id": "pytest-user-with-no-profile", "ad_id": str(campaign.id), "reaction": "like"},
@@ -50,6 +56,8 @@ def test_react_returns_404_and_does_not_log_when_no_profile(mock_record_feedback
 
 
 def test_report_requires_reason_when_category_is_other(campaign):
+    """ReportRequest's model_validator rejects category="other" with no
+    reason before the request ever reaches the handler."""
     resp = client.post(
         "/events/report",
         json={"user_id": "pytest-user", "ad_id": str(campaign.id), "category": "other"},
@@ -58,6 +66,9 @@ def test_report_requires_reason_when_category_is_other(campaign):
 
 
 def test_report_flips_campaign_to_needs_review_after_threshold(db, campaign):
+    """Three reports from three different users on the same campaign cross
+    REPORT_THRESHOLD (counted from the events table, not a separate
+    counter column) and auto-flip status to needs_review."""
     campaign.status = "active"
     db.commit()
 

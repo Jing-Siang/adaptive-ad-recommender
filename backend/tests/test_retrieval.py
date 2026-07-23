@@ -11,6 +11,8 @@ from app.serving.retrieval import retrieve_candidates
 def test_retrieve_candidates_maps_matches_to_ad_candidates(
     mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible
 ):
+    """A single eligible Pinecone match maps to an AdCandidate with the right
+    fields, and the query is oversampled 3x top_k as designed."""
     mock_index = MagicMock()
     mock_index.query.return_value = {
         "matches": [
@@ -45,6 +47,7 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(
 @patch("app.serving.retrieval.fetch_metadata", return_value={})
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
 def test_retrieve_candidates_empty_result(mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible):
+    """No Pinecone matches at all -> an empty candidate list, not an error."""
     mock_index = MagicMock()
     mock_index.query.return_value = {"matches": []}
     mock_get_index.return_value = mock_index
@@ -109,6 +112,9 @@ def test_retrieve_candidates_filters_out_blocklisted_ads(
 
 @patch("app.serving.retrieval.fetch_vector", return_value=None)
 def test_retrieve_candidates_raises_when_no_profile_exists(mock_fetch_vector):
+    """No fallback to embedding raw text -- a missing profile is a bug
+    (onboarding should have created one already), so this raises rather
+    than silently degrading to a cold-start path."""
     mock_db = MagicMock()
 
     with pytest.raises(ValueError, match="no profile found"):

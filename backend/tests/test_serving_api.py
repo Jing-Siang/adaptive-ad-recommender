@@ -27,6 +27,8 @@ def _guardrail_side_effect(ad, context_categories):
 @patch("app.serving.api.rerank", return_value=_RANKINGS)
 @patch("app.serving.api.retrieve_candidates", return_value=_CANDIDATES)
 def test_recommend_batch_sorts_by_relevance_and_filters_guardrail_blocked(mock_retrieve, mock_rerank, mock_guardrail):
+    """Batch response is sorted by relevance_score, and a higher-ranked ad
+    that fails the guardrail check is dropped rather than served."""
     resp = client.post("/recommend/batch", json={"user_id": "pytest-user", "batch_size": 10})
 
     assert resp.status_code == 200
@@ -40,16 +42,22 @@ def test_recommend_batch_sorts_by_relevance_and_filters_guardrail_blocked(mock_r
 
 @patch("app.serving.api.retrieve_candidates", side_effect=ValueError("no profile found for user 'x'"))
 def test_recommend_batch_returns_404_when_no_profile(mock_retrieve):
+    """retrieve_candidates' ValueError (no profile exists yet) surfaces as
+    HTTP 404, same translation /recommend already does."""
     resp = client.post("/recommend/batch", json={"user_id": "x", "batch_size": 10})
     assert resp.status_code == 404
 
 
 @patch("app.serving.api.retrieve_candidates", return_value=[])
 def test_recommend_batch_returns_404_when_no_candidates(mock_retrieve):
+    """A profile exists but nothing eligible matched -- also a 404, distinct
+    from the missing-profile case above but same status code."""
     resp = client.post("/recommend/batch", json={"user_id": "pytest-user", "batch_size": 10})
     assert resp.status_code == 404
 
 
 def test_recommend_batch_rejects_batch_size_over_cap():
+    """batch_size is capped at 50 (Field(le=50)) to bound a single re-rank
+    call's cost; exceeding it is a validation error, not a truncated batch."""
     resp = client.post("/recommend/batch", json={"user_id": "pytest-user", "batch_size": 51})
     assert resp.status_code == 422

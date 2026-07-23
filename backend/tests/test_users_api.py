@@ -10,6 +10,8 @@ client = TestClient(app)
 @patch("app.serving.users.upsert_vector")
 @patch("app.serving.users.embed_query", return_value=[[0.1, 0.2, 0.3]])
 def test_create_user_embeds_and_upserts_profile(mock_embed_query, mock_upsert_vector):
+    """POST /users embeds interest_summary and upserts the vector + summary
+    as a full new Pinecone record (namespace="users")."""
     resp = client.post("/users", json={"user_id": "pytest-user-1", "interest_summary": "loves home repair"})
 
     assert resp.status_code == 201
@@ -25,6 +27,8 @@ def test_create_user_embeds_and_upserts_profile(mock_embed_query, mock_upsert_ve
 
 @patch("app.serving.users.fetch_metadata", return_value={"interest_summary": "loves home repair"})
 def test_get_user_returns_profile(mock_fetch_metadata):
+    """GET /users/{id} reads interest_summary back out of Pinecone metadata,
+    never the raw profile_vector (excluded from UserResponse)."""
     resp = client.get("/users/pytest-user-1")
 
     assert resp.status_code == 200
@@ -33,6 +37,7 @@ def test_get_user_returns_profile(mock_fetch_metadata):
 
 @patch("app.serving.users.fetch_metadata", return_value=None)
 def test_get_user_not_found_returns_404(mock_fetch_metadata):
+    """No stored metadata for the user_id -- no profile exists yet."""
     resp = client.get("/users/no-such-user")
 
     assert resp.status_code == 404
@@ -41,6 +46,8 @@ def test_get_user_not_found_returns_404(mock_fetch_metadata):
 @patch("app.serving.users.update_metadata")
 @patch("app.serving.users.fetch_metadata", return_value={"interest_summary": "x", "blocklist": ["5"]})
 def test_do_not_show_appends_to_existing_blocklist(mock_fetch_metadata, mock_update_metadata):
+    """New ad_id is added to the existing blocklist (not replacing it), via
+    a partial metadata update that leaves interest_summary untouched."""
     resp = client.post("/users/pytest-user-1/do-not-show", json={"ad_id": "7"})
 
     assert resp.status_code == 204
@@ -53,5 +60,6 @@ def test_do_not_show_appends_to_existing_blocklist(mock_fetch_metadata, mock_upd
 
 @patch("app.serving.users.fetch_metadata", return_value=None)
 def test_do_not_show_not_found_returns_404(mock_fetch_metadata):
+    """Can't blocklist an ad for a user_id that has no profile yet."""
     resp = client.post("/users/no-such-user/do-not-show", json={"ad_id": "7"})
     assert resp.status_code == 404
