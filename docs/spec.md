@@ -247,10 +247,16 @@ backend/
 ## Demo artifacts
 
 - `scripts/simulate_feedback_rounds.py` — runs N rounds of recommend →
-  simulate a like reaction → update profile (`record_feedback`) →
-  re-recommend, and prints rolling CTR improving across rounds, plus one
-  example decision
-  trace.
+  simulate a reaction → update profile (`record_feedback`) → re-recommend,
+  and prints a rolling "like rate" improving across rounds, plus one example
+  decision trace. The reaction is a single-turn tool-calling LLM call (raw
+  OpenAI SDK, not LangChain -- no multi-step execution loop is needed): the
+  model gets four tools (`like`/`dislike`/`interested`/`no_reaction`) and
+  picks one based only on the persona's stated interest and the served ad's
+  own content -- never the ranking algorithm's score or rank, which would
+  make the whole demo circular (rewarding whatever the algorithm already put
+  first instead of judging genuine fit). Also logs real impression/reaction
+  events, so a run shows up in `GET /performance` like any other traffic.
 - The campaign review flow itself is a demo artifact by inspection: submit
   a campaign, watch it get reviewed asynchronously, see the policy agent's
   reasoning in the `review_reason` field and structured logs. There's no
