@@ -104,6 +104,34 @@ class RecommendationTrace(BaseModel):
     served_ad_id: str | None
 
 
+class FeedItem(AdCandidate):
+    """One ad in a batch-recommend response: an AdCandidate (content +
+    similarity_score) plus its LLM re-rank result -- enough to render the
+    feed card and answer "why am I seeing this" with no separate call."""
+
+    relevance_score: float = Field(ge=0, le=1)
+    justification: str
+
+
+class BatchRecommendationRequest(BaseModel):
+    """Request body for POST /recommend/batch -- the feed-facing recommend
+    call. One embed, one Pinecone query, one LLM re-rank covering the whole
+    batch, one guardrail pass; contrast with RecommendationRequest, which is
+    single-item. batch_size is capped to keep a single re-rank call's cost
+    bounded."""
+
+    user_id: str
+    batch_size: int = Field(default=10, gt=0, le=50)
+
+
+class BatchRecommendationResponse(BaseModel):
+    """Response body for POST /recommend/batch -- up to batch_size ranked,
+    guardrail-allowed ads, already sorted by relevance (highest first)."""
+
+    user_id: str
+    items: list[FeedItem]
+
+
 class FeedbackEvent(BaseModel):
     """Request body for POST /feedback — a simulated click/no_click/
     conversion outcome for a served ad, used to nudge the user's profile
