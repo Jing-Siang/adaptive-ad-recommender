@@ -233,10 +233,13 @@ backend/
 │   └── ad_policy_server.py         # MCP resource server for the ad policy doc
 ├── alembic/                        # DB migrations
 ├── data/
-│   └── generate_personas.py        # synthetic user generation
+│   ├── generate_personas.py        # synthetic user generation
+│   └── seed_campaigns.json         # versioned seed campaign catalog (~288 campaigns)
 ├── tests/                          # 66 tests — see README for how to run
 ├── scripts/
-│   └── simulate_feedback_rounds.py   # runs multi-round CTR demo
+│   ├── simulate_feedback_rounds.py       # runs multi-round CTR demo
+│   ├── generate_seed_campaign_data.py    # LLM-generates data/seed_campaigns.json
+│   └── seed_demo_campaigns.py            # loads that file into Postgres/Pinecone
 ├── Dockerfile
 ├── requirements.txt
 └── README.md
@@ -257,6 +260,16 @@ backend/
   make the whole demo circular (rewarding whatever the algorithm already put
   first instead of judging genuine fit). Also logs real impression/reaction
   events, so a run shows up in `GET /performance` like any other traffic.
+- `scripts/generate_seed_campaign_data.py` + `scripts/seed_demo_campaigns.py`
+  — populate a ~288-campaign catalog across 18 categories so the feed and
+  onboarding checkpoints have real candidates. Split into a generation step
+  (one LLM call per category, writes the versioned `data/seed_campaigns.json`)
+  and a loading step (creates Advertiser/Campaign rows, sets status=active
+  directly, embeds + indexes into Pinecone) -- the async policy-review job
+  is skipped entirely, with category exclusions (alcohol/gambling) applied
+  directly from `guardrails.py`'s `CATEGORY_EXCLUSIONS`. Re-running the
+  loading step alone is free and deterministic; only re-run the generation
+  step for a fresh/different catalog.
 - The campaign review flow itself is a demo artifact by inspection: submit
   a campaign, watch it get reviewed asynchronously, see the policy agent's
   reasoning in the `review_reason` field and structured logs. There's no

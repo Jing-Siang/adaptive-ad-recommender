@@ -35,9 +35,9 @@ adaptive-ad-recommender/
 │   │   └── campaigns/  # advertiser submits -> policy review -> moderation
 │   ├── mcp_servers/    # ad-policy MCP resource server
 │   ├── alembic/        # DB migrations
-│   ├── data/            # synthetic persona generation
+│   ├── data/            # synthetic personas + versioned seed campaign catalog
 │   ├── tests/
-│   └── scripts/         # simulate_feedback_rounds.py demo artifact
+│   └── scripts/         # feedback-round + demo-catalog-seeding demo artifacts
 ├── frontend/            # React + Vite + TS (placeholder, see Status)
 │   └── src/
 ├── docs/
@@ -179,7 +179,7 @@ once, per above).
 Backend: both pipelines (campaign posting/review and ad serving/feedback)
 are built, tested (66 tests), and verified working end-to-end against real
 Postgres/Redis/Pinecone/OpenAI. See [`docs/next_phase_plan.md`](docs/next_phase_plan.md)
-for what's still in progress (onboarding chat, demo seeding). Frontend is
+for what's still in progress (the onboarding chat). Frontend is
 still a placeholder — no recommendation dashboard,
 decision-trace viewer, CTR chart, or moderator queue page yet; the system is
 currently only usable via the API directly (see the curl examples above).
