@@ -75,6 +75,7 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
         Index("ix_events_campaign_id_created_at", "campaign_id", "created_at"),
+        Index("ix_events_user_id_created_at", "user_id", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
