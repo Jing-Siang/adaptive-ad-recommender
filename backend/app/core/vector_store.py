@@ -17,11 +17,20 @@ def get_index():
     return _get_client().Index(settings.pinecone_index_name)
 
 
-def fetch_vector(vector_id: str, namespace: str) -> list[float] | None:
+def _fetch(vector_id: str, namespace: str):
     index = get_index()
     result = index.fetch(ids=[vector_id], namespace=namespace)
-    vector = result.vectors.get(vector_id)
-    return vector.values if vector else None
+    return result.vectors.get(vector_id)
+
+
+def fetch_vector(vector_id: str, namespace: str) -> list[float] | None:
+    record = _fetch(vector_id, namespace)
+    return record.values if record else None
+
+
+def fetch_metadata(vector_id: str, namespace: str) -> dict | None:
+    record = _fetch(vector_id, namespace)
+    return record.metadata if record else None
 
 
 def upsert_vector(vector_id: str, values: list[float], metadata: dict, namespace: str) -> None:

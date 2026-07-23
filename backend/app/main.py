@@ -10,6 +10,7 @@ from app.serving.feedback import record_feedback
 from app.serving.guardrails import check_guardrails
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
+from app.serving.users import router as users_router
 from app.schemas import (
     Ad,
     FeedbackEvent,
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(campaigns_router)
+app.include_router(users_router)
 
 
 @app.get("/health")

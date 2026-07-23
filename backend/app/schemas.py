@@ -38,14 +38,25 @@ class AdCandidate(Ad):
     similarity_score: float
 
 
-class UserProfile(BaseModel):
-    """A user's rolling interest profile. profile_vector is the embedding
-    stored/updated in Pinecone's `users` namespace; feedback.py nudges it
-    based on click/no_click/conversion outcomes."""
+class UserCreateRequest(BaseModel):
+    """Request body for POST /users. Seeds a user's starting profile vector
+    from a free-text interest summary -- called once, at the first
+    onboarding checkpoint (see app/serving/users.py). No accounts/auth:
+    user_id is just a caller-supplied string, same attribution-not-
+    authentication pattern as advertiser_name."""
 
     user_id: str
     interest_summary: str
-    profile_vector: list[float] | None = None
+
+
+class UserResponse(BaseModel):
+    """Read model for a user's profile -- returned by both POST /users and
+    GET /users/{user_id}. Deliberately excludes the raw profile_vector
+    (an internal Pinecone implementation detail, not meaningful for
+    display or worth the payload size)."""
+
+    user_id: str
+    interest_summary: str
 
 
 class RankedAd(BaseModel):
