@@ -158,6 +158,18 @@ Observer to detect when an item actually scrolls into view, then fire a
 small, cheap "log impression" call (DB insert only, no LLM call) — same
 pattern real feeds (Twitter, Instagram) use.
 
+**Already-shown suppression (added during implementation, not in the
+original plan)**: `retrieve_candidates` excludes any campaign with an
+impression logged for the user in the last hour, so the same ad doesn't
+keep reappearing during a scroll session. Time-boxed, not permanent -- a
+permanent exclusion would eventually exhaust the demo's finite catalog.
+Implemented as a Pinecone query-time `$nin` filter (on the `campaign_id`
+metadata field, alongside the existing do-not-show blocklist), not a
+Python post-filter on an already-fetched batch -- Pinecone's single-stage
+filtering searches past excluded IDs for real matches during the search
+itself, verified live (blocklisting the top 2 of a 5-item query still
+returned a full 5, not 3).
+
 **Reactions** (replaces the earlier click/no_click/conversion idea, which
 turned out confusing — this is the resolved version):
 - **Like** ❤️ — mild positive signal (small profile nudge, small budget
