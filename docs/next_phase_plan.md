@@ -31,30 +31,104 @@ and moderator `reviewed_by`.
 - `GET /users/{user_id}` — fetch a profile's current state for display.
 
 ### View 1a — onboarding chat
+
 A new agent, but a simple one: plain multi-turn conversation, **no tools
 needed**, so per the project's LangChain-vs-raw-SDK rule this uses the raw
-OpenAI SDK directly, not LangChain.
-- Two calls per turn: **(1)** a streamed plain-text reply (the visible,
-  natural conversation — asks exploratory questions about the user's
-  interests); **(2)** a separate, non-streamed, quick structured-output
-  call after each exchange that looks at the full conversation and decides
-  `{ready_to_finish: bool, interest_summary: str | None}`. Structured
-  output doesn't stream as readable text, so it's kept out of the
-  user-visible call entirely.
-- Once `ready_to_finish`, frontend calls `POST /users` with a freshly
-  generated `user_id` + the synthesized `interest_summary`, then swaps to
-  the feed.
-- Streaming mechanism: FastAPI `StreamingResponse`, consumed on the
-  frontend via `fetch` + a `ReadableStream` reader — not the browser's
-  `EventSource`, since `EventSource` only supports GET and this needs to
-  POST the conversation history. Not WebSocket — that's for genuinely
-  bidirectional continuously-open connections; this is one-directional
-  (server to client), repeated per turn.
-- Chat history is ephemeral (kept client-side only, not persisted
-  server-side) — only the final `interest_summary` gets persisted, via
-  `POST /users`.
+OpenAI SDK directly, not LangChain. Not just Q&A, though -- it uses
+retrieval and real reactions to build the profile, not only conversation
+text (see "Why this is RAG" below for the reasoning behind that).
+
+**Per turn, two calls**: (1) a streamed plain-text reply -- the visible,
+natural conversation, asking exploratory questions -- and (2) a separate,
+non-streamed, quick structured-output call that looks at the full
+conversation so far and returns `{ready_to_finish: bool, interest_summary:
+str}`. `interest_summary` is always populated, even a rough best-effort
+one, not only once "finished" -- structured output doesn't stream as
+readable text, which is why it's a second call kept out of the
+user-visible stream entirely.
+
+**The full flow**:
+1. Turn 1: chat opens with a broad question. User replies.
+2. **Checkpoint**: embed the current `interest_summary`, pull a few real
+   candidates via the existing `retrieve_candidates`, show them in the
+   chat as reactable cards ("here's a few things you might like"). The
+   very first checkpoint calls `POST /users` to seed the profile from this
+   embedding, since no profile exists yet at that point.
+3. User reacts (like/dislike) to the shown candidates. These reactions
+   *are* real feedback -- nudge the profile using the same
+   `update_profile_vector` logic `record_feedback` already uses for the
+   feed.
+4. Feed the shown candidates + how the user reacted to them back into the
+   chat's own context, so the *next generated question* is actually
+   informed by that (liked plumbing, disliked skincare -> ask about
+   DIY/home-repair specifically, not a generic follow-up).
+5. If reactions were confidently positive, wrap up soon. If mixed or
+   negative, ask 1-2 more clarifying questions, then repeat from step 2
+   with a refreshed `interest_summary`. **Capped at 3 checkpoint rounds
+   total** -- if still ambiguous after the third, finalize with whatever
+   profile exists rather than dragging on indefinitely.
+6. Once finished, transition to the feed. The profile already exists and
+   is reaction-tested from the checkpoints -- no separate "finalize"
+   API call needed beyond what step 2 already did.
+
+**Why this is RAG, not just retrieval** (worth keeping the reasoning, not
+just the conclusion -- this was non-obvious): showing retrieved candidates
+to a human to react to is *not* RAG by itself, that's just retrieval plus
+human input, no generation is informed by what's retrieved. The round-trip
+through the user (retrieve -> show -> user reacts -> reaction comes back)
+doesn't disqualify it either -- real interactive RAG systems commonly have
+a human step in the middle (e.g. a shopping assistant that shows retrieved
+products, gets a reaction, and reasons about that reaction using the
+products' actual content in its next response). What makes it RAG here is
+step 4 specifically: the retrieved items' real content -- not just an
+opaque "liked/disliked" signal -- sits in the context that produces the
+next generation. Skip step 4 and this stops being RAG; it'd just be
+retrieval with an extra UI step.
+
+**Other mechanics**:
+- Streaming: FastAPI `StreamingResponse`, consumed via `fetch` + a
+  `ReadableStream` reader on the frontend -- not `EventSource` (GET-only,
+  and this needs to POST conversation history), not WebSocket (that's for
+  genuinely bidirectional continuously-open connections; this is
+  one-directional, server to client, repeated per turn).
+- Chat history is ephemeral (client-side only, never persisted
+  server-side) -- only the profile vector built during checkpoints
+  persists, via the same Pinecone upserts `record_feedback` already does.
 - Restart/reset button: abandon the current `user_id` client-side, start a
   fresh chat with a new one. No deletion needed.
+- The chat UI needs to render ad-card-like elements with reaction buttons
+  inline in the conversation, not just text bubbles -- meaningfully more
+  frontend work than a plain chat. Depends on a reasonable, varied
+  candidate pool already existing for checkpoints to draw from (see
+  seeding, below) -- onboarding can't show good candidates if the campaign
+  catalog is thin.
+
+### Demo data seeding
+
+A script to populate a reasonable, varied campaign catalog before the
+frontend work is demoable at all -- onboarding checkpoints and the feed
+both need real candidates to draw from.
+
+**Cost-conscious design (the project has a small real API budget, this
+was checked, not assumed)**: create real `Advertiser` + `Campaign` rows for
+each seed campaign (proper ownership, budget, eligibility dates -- the
+full data model, unlike the deleted `load_catalog.py`, which had none of
+that structure at all), but set `status="active"` directly and call
+`index_campaign` (embed + Pinecone upsert) directly -- **skip the LLM
+policy-review call entirely** for seed data, since we're writing the
+content ourselves and already know it's compliant, and a real review call
+(chat completion, sometimes triggering web search) is the actually
+expensive part, not the embedding. Confirmed: `text-embedding-3-small` is
+$0.02 per 1M tokens (input only, no output tokens for embeddings) -- even
+100 seed campaigns at a generous 100 tokens each is 10,000 tokens, i.e.
+$0.0002 total. The real review pipeline still gets fully exercised
+whenever someone actually submits a new campaign live through View 3 --
+that's one on-demand call at normal usage, not a bulk cost.
+
+Include some variety deliberately: different categories, and some of the
+same substantiation/restricted-category cases already used to test policy
+review (alcohol needing exclusions, health/financial claims), so the
+catalog is realistic even though these particular ones skip live review.
 
 ### View 1b — the feed
 Threads-like vertically scrolling list; each item is one served ad.
@@ -160,6 +234,10 @@ Backend:
 - [ ] Performance aggregation endpoint (CTR/engagement/dislike rate,
       spend, CPA, rolling trend, per-campaign breakdown)
 - [ ] Streaming onboarding-chat endpoint (two calls per turn, as above)
+- [ ] Onboarding checkpoint logic: rough interest_summary every turn,
+      retrieve + return candidates for reactable cards, cap at 3 rounds
+- [ ] Demo data seeding script (real Advertiser/Campaign rows, skip LLM
+      review, direct embed + index -- see "Demo data seeding" above)
 - [ ] Update `LEARNING_RATE`/`COST_PER_OUTCOME` dicts and `FeedbackEvent`
       schema for the new outcome vocabulary (like/dislike/conversion,
       `no_click` becomes purely implicit, never sent explicitly)
@@ -169,7 +247,8 @@ Backend:
       trigger for the escalation-agent idea
 
 Frontend (`frontend/`, currently just the Vite placeholder):
-- [ ] View 1a — onboarding chat (streamed)
+- [ ] View 1a — onboarding chat (streamed, with reactable candidate cards
+      at each checkpoint)
 - [ ] View 1b — feed (batched fetch, Intersection-Observer impressions,
       Like/Dislike/Interested reactions, report modal, do-not-show-again,
       why-am-I-seeing-this)
