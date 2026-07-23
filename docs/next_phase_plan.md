@@ -131,8 +131,14 @@ that's one on-demand call at normal usage, not a bulk cost.
 
 Include some variety deliberately: different categories, and some of the
 same substantiation/restricted-category cases already used to test policy
-review (alcohol needing exclusions, health/financial claims), so the
-catalog is realistic even though these particular ones skip live review.
+review (alcohol/gambling needing exclusions), so the catalog is realistic
+even though these particular ones skip live review. **Implemented as ~288
+campaigns across 18 categories** (16 each) -- generation (an LLM call per
+category) and loading (Postgres + Pinecone writes) are split into two
+scripts, `generate_seed_campaign_data.py` and `seed_demo_campaigns.py`, so
+the generated content is a versioned JSON fixture (`data/seed_campaigns.json`)
+rather than something re-generated (non-deterministically, and at some
+small cost) on every re-seed of a reset dev environment.
 
 ### View 1b — the feed
 Threads-like vertically scrolling list; each item is one served ad.
@@ -250,8 +256,12 @@ Backend:
 - [ ] Streaming onboarding-chat endpoint (two calls per turn, as above)
 - [ ] Onboarding checkpoint logic: rough interest_summary every turn,
       retrieve + return candidates for reactable cards, cap at 3 rounds
-- [ ] Demo data seeding script (real Advertiser/Campaign rows, skip LLM
-      review, direct embed + index -- see "Demo data seeding" above)
+- [x] Demo data seeding script (real Advertiser/Campaign rows, skip LLM
+      review, direct embed + index) -- split into
+      `generate_seed_campaign_data.py` (LLM generation -> versioned
+      `data/seed_campaigns.json`) and `seed_demo_campaigns.py` (loads that
+      file into Postgres/Pinecone, no LLM call); ~288 campaigns across 18
+      categories, verified end-to-end via a live `/recommend/batch` call
 - [x] Update `LEARNING_RATE`/`COST_PER_OUTCOME` dicts for the new outcome
       vocabulary (like/dislike/interested; `no_click` is now purely
       implicit -- no event fires at all for silence, never sent
