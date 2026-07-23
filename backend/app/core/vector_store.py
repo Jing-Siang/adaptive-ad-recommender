@@ -46,3 +46,12 @@ def update_vector(vector_id: str, values: list[float], namespace: str) -> None:
     (e.g. a user's interest_summary) is left untouched, unlike upsert_vector."""
     index = get_index()
     index.update(id=vector_id, values=values, namespace=namespace)
+
+
+def update_metadata(vector_id: str, metadata: dict, namespace: str) -> None:
+    """Partial update -- only the given metadata fields are set (or added);
+    any other existing metadata field (or the vector's own values) is left
+    untouched. Used for e.g. appending to a user's blocklist without
+    disturbing interest_summary or the profile vector."""
+    index = get_index()
+    index.update(id=vector_id, set_metadata=metadata, namespace=namespace)

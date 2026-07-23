@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.embeddings import embed_query
 from app.core.logging_utils import log_event
-from app.core.vector_store import fetch_metadata, upsert_vector
-from app.schemas import UserCreateRequest, UserResponse
+from app.core.vector_store import fetch_metadata, update_metadata, upsert_vector
+from app.schemas import DoNotShowRequest, UserCreateRequest, UserResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -30,3 +30,18 @@ def get_user(user_id: str) -> UserResponse:
     if metadata is None:
         raise HTTPException(status_code=404, detail=f"no profile found for user '{user_id}'")
     return UserResponse(user_id=user_id, interest_summary=metadata.get("interest_summary", ""))
+
+
+@router.post("/{user_id}/do-not-show", status_code=204)
+def do_not_show(user_id: str, request: DoNotShowRequest) -> None:
+    """Permanent per-user exclusion -- not a learning signal, so no profile
+    nudge and no event log entry, just an addition to the user's blocklist
+    (checked during retrieval, see retrieval.py)."""
+    metadata = fetch_metadata(user_id, namespace="users")
+    if metadata is None:
+        raise HTTPException(status_code=404, detail=f"no profile found for user '{user_id}'")
+
+    blocklist = set(metadata.get("blocklist", []))
+    blocklist.add(request.ad_id)
+    update_metadata(user_id, metadata={"blocklist": list(blocklist)}, namespace="users")
+    log_event("ad_blocklisted", user_id=user_id, ad_id=request.ad_id)

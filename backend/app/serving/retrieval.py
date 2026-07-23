@@ -2,7 +2,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.core.vector_store import fetch_vector, get_index
+from app.core.vector_store import fetch_metadata, fetch_vector, get_index
 from app.models import Campaign
 from app.schemas import AdCandidate
 
@@ -45,6 +45,7 @@ def retrieve_candidates(db: Session, user_id: str, top_k: int = 10) -> list[AdCa
     vector = fetch_vector(user_id, namespace="users")
     if vector is None:
         raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
+    blocklist = set((fetch_metadata(user_id, namespace="users") or {}).get("blocklist", []))
     index = get_index()
     result = index.query(
         vector=vector,
@@ -59,6 +60,8 @@ def retrieve_candidates(db: Session, user_id: str, top_k: int = 10) -> list[AdCa
 
     candidates = []
     for match in matches:
+        if match["id"] in blocklist:
+            continue
         if int(match["id"]) not in eligible_ids:
             continue
         candidates.append(

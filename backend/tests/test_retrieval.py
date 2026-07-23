@@ -6,8 +6,11 @@ from app.serving.retrieval import retrieve_candidates
 
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value={1})
 @patch("app.serving.retrieval.get_index")
+@patch("app.serving.retrieval.fetch_metadata", return_value={})
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
-def test_retrieve_candidates_maps_matches_to_ad_candidates(mock_fetch_vector, mock_get_index, mock_eligible):
+def test_retrieve_candidates_maps_matches_to_ad_candidates(
+    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible
+):
     mock_index = MagicMock()
     mock_index.query.return_value = {
         "matches": [
@@ -39,8 +42,9 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(mock_fetch_vector, mo
 
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value=set())
 @patch("app.serving.retrieval.get_index")
+@patch("app.serving.retrieval.fetch_metadata", return_value={})
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
-def test_retrieve_candidates_empty_result(mock_fetch_vector, mock_get_index, mock_eligible):
+def test_retrieve_candidates_empty_result(mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible):
     mock_index = MagicMock()
     mock_index.query.return_value = {"matches": []}
     mock_get_index.return_value = mock_index
@@ -53,11 +57,40 @@ def test_retrieve_candidates_empty_result(mock_fetch_vector, mock_get_index, moc
 
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value={2})
 @patch("app.serving.retrieval.get_index")
+@patch("app.serving.retrieval.fetch_metadata", return_value={})
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
-def test_retrieve_candidates_filters_out_ineligible_campaigns(mock_fetch_vector, mock_get_index, mock_eligible):
+def test_retrieve_candidates_filters_out_ineligible_campaigns(
+    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible
+):
     """Campaign 1 is a closer vector match, but only campaign 2 is eligible
     (e.g. campaign 1's budget is exhausted or it's expired) -- it should be
     excluded even though Pinecone returned it."""
+    mock_index = MagicMock()
+    mock_index.query.return_value = {
+        "matches": [
+            {"id": "1", "score": 0.95, "metadata": {"headline": "A", "description": "A", "category": "x"}},
+            {"id": "2", "score": 0.80, "metadata": {"headline": "B", "description": "B", "category": "x"}},
+        ]
+    }
+    mock_get_index.return_value = mock_index
+    mock_db = MagicMock()
+
+    candidates = retrieve_candidates(mock_db, "user-123", top_k=5)
+
+    assert len(candidates) == 1
+    assert candidates[0].ad_id == "2"
+
+
+@patch("app.serving.retrieval._eligible_campaign_ids", return_value={1, 2})
+@patch("app.serving.retrieval.get_index")
+@patch("app.serving.retrieval.fetch_metadata", return_value={"blocklist": ["1"]})
+@patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
+def test_retrieve_candidates_filters_out_blocklisted_ads(
+    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible
+):
+    """Campaign 1 is both eligible and a closer match, but the user has
+    do-not-show'd it -- it must be excluded even though nothing else about
+    it disqualifies it."""
     mock_index = MagicMock()
     mock_index.query.return_value = {
         "matches": [

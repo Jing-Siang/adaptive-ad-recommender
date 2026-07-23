@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.logging_utils import log_duration, log_event
-from app.serving.feedback import record_feedback
 from app.serving.guardrails import check_guardrails
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
@@ -12,7 +11,6 @@ from app.schemas import (
     BatchRecommendationRequest,
     BatchRecommendationResponse,
     FeedItem,
-    FeedbackEvent,
     RecommendationRequest,
     RecommendationTrace,
 )
@@ -111,13 +109,3 @@ def recommend_batch(request: BatchRecommendationRequest, db: Session = Depends(g
         )
 
         return BatchRecommendationResponse(user_id=request.user_id, items=items)
-
-
-@router.post("/feedback")
-def feedback(event: FeedbackEvent, db: Session = Depends(get_db)) -> dict:
-    log_event("feedback_received", **event.model_dump())
-    try:
-        record_feedback(db, event)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"status": "recorded"}

@@ -36,3 +36,22 @@ def test_get_user_not_found_returns_404(mock_fetch_metadata):
     resp = client.get("/users/no-such-user")
 
     assert resp.status_code == 404
+
+
+@patch("app.serving.users.update_metadata")
+@patch("app.serving.users.fetch_metadata", return_value={"interest_summary": "x", "blocklist": ["5"]})
+def test_do_not_show_appends_to_existing_blocklist(mock_fetch_metadata, mock_update_metadata):
+    resp = client.post("/users/pytest-user-1/do-not-show", json={"ad_id": "7"})
+
+    assert resp.status_code == 204
+    mock_update_metadata.assert_called_once()
+    args, kwargs = mock_update_metadata.call_args
+    assert args[0] == "pytest-user-1"
+    assert set(kwargs["metadata"]["blocklist"]) == {"5", "7"}
+    assert kwargs["namespace"] == "users"
+
+
+@patch("app.serving.users.fetch_metadata", return_value=None)
+def test_do_not_show_not_found_returns_404(mock_fetch_metadata):
+    resp = client.post("/users/no-such-user/do-not-show", json={"ad_id": "7"})
+    assert resp.status_code == 404

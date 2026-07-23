@@ -1,5 +1,6 @@
-"""Demo artifact: runs N rounds of recommend -> simulate click -> update profile ->
-re-recommend, and prints CTR improving across rounds plus one example decision trace."""
+"""Demo artifact: runs N rounds of recommend -> simulate a like reaction -> update
+profile -> re-recommend, and prints CTR improving across rounds plus one example
+decision trace."""
 
 import argparse
 import random
@@ -7,7 +8,6 @@ import random
 from app.core.db import SessionLocal
 from app.core.embeddings import embed_query
 from app.core.vector_store import fetch_vector, upsert_vector
-from app.schemas import FeedbackEvent
 from app.serving.feedback import record_feedback
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
@@ -22,12 +22,15 @@ def _ensure_profile(user_id: str, interest_text: str) -> None:
         upsert_vector(user_id, vector, metadata={"interest_summary": interest_text}, namespace="users")
 
 
-def simulate_click(ranked_ads, click_prob_top: float = 0.6) -> str | None:
-    """Toy simulator: the top-ranked ad is clicked with high probability, lower ones less so."""
+def simulate_reaction(ranked_ads, like_prob_top: float = 0.6) -> str | None:
+    """Toy simulator: the top-ranked ad gets a "like" with high probability, lower
+    ones less so. No reaction at all (the common case) is possible and does not
+    nudge the profile -- there's no implicit negative signal anymore, only an
+    explicit dislike, which this simulator doesn't model."""
     if not ranked_ads:
         return None
     for i, ad in enumerate(ranked_ads):
-        if random.random() < click_prob_top * (0.7**i):
+        if random.random() < like_prob_top * (0.7**i):
             return ad.ad_id
     return None
 
@@ -44,16 +47,15 @@ def run(user_id: str, rounds: int, top_k: int, interest_text: str) -> None:
             rankings = rerank(user_context=user_id, candidates=candidates)
             ranked = sorted(rankings, key=lambda r: r.relevance_score, reverse=True)
 
-            clicked_id = simulate_click(ranked)
-            ctr_history.append(1 if clicked_id else 0)
-            last_trace = {"round": round_num, "candidates": candidates, "rankings": ranked, "clicked": clicked_id}
+            liked_id = simulate_reaction(ranked)
+            ctr_history.append(1 if liked_id else 0)
+            last_trace = {"round": round_num, "candidates": candidates, "rankings": ranked, "liked": liked_id}
 
             served_id = ranked[0].ad_id if ranked else None
-            if served_id:
-                outcome = "click" if clicked_id == served_id else "no_click"
-                record_feedback(db, FeedbackEvent(user_id=user_id, ad_id=served_id, outcome=outcome))
+            if served_id and liked_id == served_id:
+                record_feedback(db, user_id, served_id, "like")
 
-            print(f"round {round_num}: served={served_id} clicked={clicked_id}")
+            print(f"round {round_num}: served={served_id} liked={liked_id}")
     finally:
         db.close()
 

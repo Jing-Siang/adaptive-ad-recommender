@@ -11,7 +11,7 @@ Organized into two sections matching the two pipelines in app/:
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --------------------------------------------------------------------------
 # Serving: recommending an ad to a user (app/serving/)
@@ -132,14 +132,53 @@ class BatchRecommendationResponse(BaseModel):
     items: list[FeedItem]
 
 
-class FeedbackEvent(BaseModel):
-    """Request body for POST /feedback — a simulated click/no_click/
-    conversion outcome for a served ad, used to nudge the user's profile
-    vector (see feedback.update_profile_vector)."""
+class ImpressionRequest(BaseModel):
+    """Request body for POST /events/impression -- fired client-side (via an
+    Intersection Observer) when a feed item actually scrolls into view. Pure
+    DB insert: no profile nudge, no budget debit -- this only exists so CTR/
+    engagement-rate denominators are real counts, not proxies."""
 
     user_id: str
     ad_id: str
-    outcome: str = Field(pattern="^(click|no_click|conversion)$")
+
+
+class ReactionRequest(BaseModel):
+    """Request body for POST /events/reaction. One endpoint for all three
+    reactions (reaction is a body field, not the URL) -- matches how
+    ModerationRequest.outcome already works elsewhere in this app. Each
+    reaction logs an event and nudges the user's profile vector;
+    like/interested also debit the campaign's budget (see
+    feedback.record_feedback)."""
+
+    user_id: str
+    ad_id: str
+    reaction: Literal["like", "dislike", "interested"]
+
+
+class ReportRequest(BaseModel):
+    """Request body for POST /events/report. reason is free text, required
+    only when category is 'other' -- the predefined categories are
+    self-explanatory enough not to need it."""
+
+    user_id: str
+    ad_id: str
+    category: Literal["misleading", "offensive", "irrelevant", "spam", "other"]
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _reason_required_for_other(self) -> "ReportRequest":
+        if self.category == "other" and not self.reason:
+            raise ValueError("reason is required when category is 'other'")
+        return self
+
+
+class DoNotShowRequest(BaseModel):
+    """Request body for POST /users/{user_id}/do-not-show -- a permanent
+    per-user exclusion, not a learning signal (no profile nudge, no event
+    log entry). Stored in the user's Pinecone metadata, checked during
+    retrieval (see retrieval.py)."""
+
+    ad_id: str
 
 
 # --------------------------------------------------------------------------

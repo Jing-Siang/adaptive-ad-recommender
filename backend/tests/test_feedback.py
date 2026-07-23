@@ -3,7 +3,6 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from app.schemas import FeedbackEvent
 from app.serving.feedback import _debit_campaign_budget, record_feedback, update_profile_vector
 
 UNIT_PROFILE = [1.0, 0.0, 0.0]
@@ -13,23 +12,23 @@ UNIT_AD = [0.0, 1.0, 0.0]
 # --- update_profile_vector: pure math, no mocking needed ---
 
 
-def test_update_profile_vector_click_nudges_toward_ad():
-    updated = update_profile_vector(UNIT_PROFILE, UNIT_AD, "click")
+def test_update_profile_vector_like_nudges_toward_ad():
+    updated = update_profile_vector(UNIT_PROFILE, UNIT_AD, "like")
     # moved partway from [1,0,0] toward [0,1,0] -> some positive weight on both axes
     assert updated[0] < 1.0
     assert updated[1] > 0.0
 
 
-def test_update_profile_vector_conversion_nudges_more_than_click():
-    click_result = update_profile_vector(UNIT_PROFILE, UNIT_AD, "click")
-    conversion_result = update_profile_vector(UNIT_PROFILE, UNIT_AD, "conversion")
-    # conversion has a higher learning rate, so it should move further along the
+def test_update_profile_vector_interested_nudges_more_than_like():
+    like_result = update_profile_vector(UNIT_PROFILE, UNIT_AD, "like")
+    interested_result = update_profile_vector(UNIT_PROFILE, UNIT_AD, "interested")
+    # interested has a higher learning rate, so it should move further along the
     # same direction -- i.e. end up with a larger y-component.
-    assert conversion_result[1] > click_result[1]
+    assert interested_result[1] > like_result[1]
 
 
-def test_update_profile_vector_no_click_moves_away_from_ad():
-    updated = update_profile_vector(UNIT_PROFILE, UNIT_AD, "no_click")
+def test_update_profile_vector_dislike_moves_away_from_ad():
+    updated = update_profile_vector(UNIT_PROFILE, UNIT_AD, "dislike")
     # negative rate -> cosine similarity to the ad should decrease (here, go
     # from orthogonal (0.0) to negative), not increase or stay the same.
     original_similarity = float(np.dot(UNIT_PROFILE, UNIT_AD))
@@ -38,7 +37,7 @@ def test_update_profile_vector_no_click_moves_away_from_ad():
 
 
 def test_update_profile_vector_result_is_unit_normalized():
-    updated = update_profile_vector(UNIT_PROFILE, UNIT_AD, "conversion")
+    updated = update_profile_vector(UNIT_PROFILE, UNIT_AD, "interested")
     assert np.linalg.norm(updated) == pytest.approx(1.0)
 
 
@@ -53,24 +52,24 @@ def test_update_profile_vector_unknown_outcome_is_a_no_op_before_normalization()
 # --- _debit_campaign_budget: real DB, no mocking ---
 
 
-def test_debit_campaign_budget_click_debits_flat_cost(db, campaign):
+def test_debit_campaign_budget_like_debits_flat_cost(db, campaign):
     campaign.budget_total = 10.0
     campaign.budget_spent = 0.0
     db.commit()
 
-    _debit_campaign_budget(db, campaign.id, "click")
+    _debit_campaign_budget(db, campaign.id, "like")
 
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.50)
     assert campaign.status == "active"
 
 
-def test_debit_campaign_budget_no_click_costs_nothing(db, campaign):
+def test_debit_campaign_budget_dislike_costs_nothing(db, campaign):
     campaign.budget_total = 10.0
     campaign.budget_spent = 0.0
     db.commit()
 
-    _debit_campaign_budget(db, campaign.id, "no_click")
+    _debit_campaign_budget(db, campaign.id, "dislike")
 
     db.refresh(campaign)
     assert campaign.budget_spent == 0.0
@@ -81,15 +80,15 @@ def test_debit_campaign_budget_exhausts_and_completes(db, campaign):
     campaign.budget_spent = 0.0
     db.commit()
 
-    _debit_campaign_budget(db, campaign.id, "click")  # 0.50
-    _debit_campaign_budget(db, campaign.id, "click")  # 1.00 -> exhausted
+    _debit_campaign_budget(db, campaign.id, "like")  # 0.50
+    _debit_campaign_budget(db, campaign.id, "like")  # 1.00 -> exhausted
 
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(1.0)
     assert campaign.status == "completed"
 
 
-# --- record_feedback: mock Pinecone (fetch_vector/upsert_vector), real DB ---
+# --- record_feedback: mock Pinecone (fetch_vector/update_vector), real DB ---
 
 
 @patch("app.serving.feedback.update_vector")
@@ -100,9 +99,8 @@ def test_record_feedback_debits_budget_and_returns_new_vector(mock_fetch, mock_u
     db.commit()
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
-    event = FeedbackEvent(user_id="pytest-user", ad_id=str(campaign.id), outcome="click")
 
-    new_vector = record_feedback(db, event)
+    new_vector = record_feedback(db, "pytest-user", str(campaign.id), "like")
 
     assert new_vector is not None
     mock_update.assert_called_once()
@@ -121,10 +119,9 @@ def test_record_feedback_raises_when_no_profile_exists(mock_fetch, mock_update, 
     db.commit()
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else None
-    event = FeedbackEvent(user_id="pytest-user-with-no-profile", ad_id=str(campaign.id), outcome="click")
 
     with pytest.raises(ValueError, match="no profile found"):
-        record_feedback(db, event)
+        record_feedback(db, "pytest-user-with-no-profile", str(campaign.id), "like")
 
     mock_update.assert_not_called()
 
@@ -133,9 +130,8 @@ def test_record_feedback_raises_when_no_profile_exists(mock_fetch, mock_update, 
 @patch("app.serving.feedback.fetch_vector")
 def test_record_feedback_raises_when_ad_not_found(mock_fetch, mock_update, db):
     mock_fetch.return_value = None
-    event = FeedbackEvent(user_id="pytest-user", ad_id="999999999", outcome="click")
 
     with pytest.raises(ValueError):
-        record_feedback(db, event)
+        record_feedback(db, "pytest-user", "999999999", "like")
 
     mock_update.assert_not_called()
