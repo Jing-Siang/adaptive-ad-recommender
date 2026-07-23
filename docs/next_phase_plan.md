@@ -17,9 +17,13 @@ beyond the Vite placeholder — this phase covers both.
 ## Decisions
 
 ### Retrieval bug fix
-`retrieve_candidates` should try `fetch_vector(user_id, namespace="users")`
-first; only fall back to embedding provided text if no profile exists yet
-(a brand-new user, cold start).
+`retrieve_candidates` now takes a `user_id` and requires
+`fetch_vector(user_id, namespace="users")` to return a real vector -- no
+fallback to embedding raw text. Onboarding (`POST /users`, then the
+checkpoint flow) always creates a profile before a user ever reaches
+`/recommend`, so a missing profile means recommend was called before
+onboarding finished -- a bug to surface (raises `ValueError` -> HTTP 404),
+not a legitimate cold-start case to paper over silently. **Done.**
 
 ### User profiles without login
 No accounts, no auth (consistent with the existing no-auth scope
@@ -219,8 +223,8 @@ reports piling up on a campaign (View 1b) can land it in this same queue.
 ## TODO
 
 Backend:
-- [ ] Fix `retrieve_candidates` to read the stored profile vector first,
-      fall back to embedding text only for a brand-new user
+- [x] Fix `retrieve_candidates` to read the stored profile vector first
+      (raises if missing, no silent fallback -- see above)
 - [ ] `POST /users`, `GET /users/{user_id}`
 - [ ] Event log table (impression/like/dislike/interested/report) +
       migration
