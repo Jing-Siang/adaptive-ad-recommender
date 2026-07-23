@@ -232,12 +232,19 @@ Backend:
 - [x] Batch-recommend endpoint (ranked list of N, not just the top one) --
       `POST /recommend/batch`, also extracted /recommend and /feedback out
       of main.py into app/serving/api.py
-- [ ] Impression-logging endpoint (lightweight, client-triggered)
-- [ ] Reaction endpoint(s): like/dislike/interested/report (with
+- [x] Impression-logging endpoint (lightweight, client-triggered) --
+      `POST /events/impression`
+- [x] Reaction endpoint(s): like/dislike/interested/report (with
       category+reason), do-not-show-again (separate, not a learning
-      signal)
-- [ ] Per-user blocklist storage + retrieval filtering
-- [ ] Report-count threshold auto-flip to `needs_review`
+      signal) -- `POST /events/reaction`, `POST /events/report`,
+      `POST /users/{user_id}/do-not-show`; retires `/feedback` and
+      `FeedbackEvent` entirely rather than keeping both
+- [x] Per-user blocklist storage + retrieval filtering -- blocklist lives
+      in the user's Pinecone metadata, filtered in `retrieve_candidates`
+- [x] Report-count threshold auto-flip to `needs_review` -- counted
+      straight from the `events` table (`REPORT_THRESHOLD = 3`), no
+      separate counter column; escalation agent left as a future upgrade
+      per `docs/future_ideas.md` (confirmed, not pulled into this phase)
 - [ ] Performance aggregation endpoint (CTR/engagement/dislike rate,
       spend, CPA, rolling trend, per-campaign breakdown)
 - [ ] Streaming onboarding-chat endpoint (two calls per turn, as above)
@@ -245,13 +252,15 @@ Backend:
       retrieve + return candidates for reactable cards, cap at 3 rounds
 - [ ] Demo data seeding script (real Advertiser/Campaign rows, skip LLM
       review, direct embed + index -- see "Demo data seeding" above)
-- [ ] Update `LEARNING_RATE`/`COST_PER_OUTCOME` dicts and `FeedbackEvent`
-      schema for the new outcome vocabulary (like/dislike/conversion,
-      `no_click` becomes purely implicit, never sent explicitly)
-- [ ] Rework or retire `scripts/simulate_feedback_rounds.py` to match the
-      new outcome vocabulary (currently sends explicit click/no_click)
-- [ ] Update `docs/future_ideas.md`: note report-count as the concrete
-      trigger for the escalation-agent idea
+- [x] Update `LEARNING_RATE`/`COST_PER_OUTCOME` dicts for the new outcome
+      vocabulary (like/dislike/interested; `no_click` is now purely
+      implicit -- no event fires at all for silence, never sent
+      explicitly)
+- [x] Rework `scripts/simulate_feedback_rounds.py` to match the new
+      outcome vocabulary (now simulates a like reaction, not click/no_click)
+- [x] Update `docs/future_ideas.md`: report-count noted as the concrete
+      trigger for the escalation-agent idea (done in an earlier planning
+      pass, before implementation started)
 
 Frontend (`frontend/`, currently just the Vite placeholder):
 - [ ] View 1a — onboarding chat (streamed, with reactable candidate cards
