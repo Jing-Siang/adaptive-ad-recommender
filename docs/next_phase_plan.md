@@ -225,7 +225,8 @@ reports piling up on a campaign (View 1b) can land it in this same queue.
 Backend:
 - [x] Fix `retrieve_candidates` to read the stored profile vector first
       (raises if missing, no silent fallback -- see above)
-- [ ] `POST /users`, `GET /users/{user_id}`
+- [x] `POST /users`, `GET /users/{user_id}` (profile lives in Pinecone's
+      `users` namespace only, no Postgres table)
 - [ ] Event log table (impression/like/dislike/interested/report) +
       migration
 - [ ] Batch-recommend endpoint (ranked list of N, not just the top one)
