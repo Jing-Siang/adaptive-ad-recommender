@@ -229,7 +229,9 @@ Backend:
       `users` namespace only, no Postgres table)
 - [x] Event log table (impression/like/dislike/interested/report) +
       migration
-- [ ] Batch-recommend endpoint (ranked list of N, not just the top one)
+- [x] Batch-recommend endpoint (ranked list of N, not just the top one) --
+      `POST /recommend/batch`, also extracted /recommend and /feedback out
+      of main.py into app/serving/api.py
 - [ ] Impression-logging endpoint (lightweight, client-triggered)
 - [ ] Reaction endpoint(s): like/dislike/interested/report (with
       category+reason), do-not-show-again (separate, not a learning
