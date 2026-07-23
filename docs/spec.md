@@ -34,7 +34,7 @@ only exist because the system runs and accumulates data over time.
 | API layer | **FastAPI** |
 | Reliability | `tenacity` (retries/backoff, `reraise=True` so callers see the real exception), Pydantic (structured output validation), atomic SQL updates for budget (no read-modify-write) |
 | Observability | Structured (JSON) logging of every recommendation and review decision |
-| Testing | `pytest` — 42 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
+| Testing | `pytest` — 60 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
 | Deployment | Docker Compose (postgres, redis, backend, worker, frontend) → Railway or Render for production |
 
 ---
@@ -46,12 +46,18 @@ only exist because the system runs and accumulates data over time.
   embedded and indexed. There's no bulk-ingestion script; this is
   deliberate, since a static catalog with no owning campaign/budget/review
   record would bypass the whole review and budget system.
-- **User profiles**: synthetic personas with a generated browsing/interest
-  history (LLM-generated for the demo, clearly labeled as synthetic — see
-  `data/generate_personas.py`).
-- **Feedback**: simulated click/no_click/conversion outcomes used to update
-  each user's profile vector and debit the serving campaign's budget over
-  multiple rounds.
+- **User profiles**: no accounts/login (see "Deliberate scope decisions"
+  below) — a user is just a caller-supplied `user_id` string. `POST /users`
+  seeds the starting profile vector from a free-text interest summary,
+  stored (alongside a per-user blocklist) in Pinecone's `users` namespace —
+  there's no Postgres table for this, the vector store is the only home for
+  profile state. Synthetic personas (`data/generate_personas.py`) generate
+  demo interest summaries; they're clearly labeled as synthetic.
+- **Feedback**: like/dislike/interested reactions to a served ad update that
+  user's profile vector and debit the serving campaign's budget; every
+  impression/reaction/report is also logged to a Postgres `events` table
+  (the history the performance dashboard aggregates over — Pinecone only
+  ever holds current state, not a timeline).
 
 ---
 
@@ -93,38 +99,66 @@ only exist because the system runs and accumulates data over time.
 
 ### B. Serving — recommending an ad to a user
 
-1. **Retrieval** (`serving/retrieval.py`) — embed the user's profile text,
-   query Pinecone's `ads` namespace for the nearest matches (cosine
-   similarity, no LLM call), oversampling 3x top_k. Matches are then
-   filtered against **Postgres** (the source of truth, not Pinecone
-   metadata): only campaigns that are `status=active`, have
-   `budget_spent < budget_total`, and are within their `start_date`/
-   `end_date` window are kept, down to top_k.
+0. **Profile creation** (`POST /users`, `serving/users.py`) — no accounts:
+   a user is just a caller-supplied `user_id` string. This embeds a
+   free-text interest summary and stores it (vector + summary + an empty
+   blocklist) as a new record in Pinecone's `users` namespace. Every other
+   step below requires this to have already run — there's no cold-start
+   fallback that embeds text on the fly.
+1. **Retrieval** (`serving/retrieval.py`) — read the user's *stored* profile
+   vector back out of Pinecone (never re-embeds anything at recommend time),
+   query the `ads` namespace for the nearest matches (cosine similarity, no
+   LLM call), oversampling 3x top_k. Matches on the user's do-not-show
+   blocklist are dropped, then the rest are filtered against **Postgres**
+   (the source of truth, not Pinecone metadata): only campaigns that are
+   `status=active`, have `budget_spent < budget_total`, and are within their
+   `start_date`/`end_date` window are kept, down to top_k.
 2. **LLM re-ranking** (`serving/ranking.py`) — the surviving candidates +
    user context go to the LLM, which reasons about *intent*, not just
    vector similarity (e.g. someone reading about a leaky faucet wants a
    plumber ad *now*, not a general hardware store ad). Structured output
    (`{ad_id, relevance_score, justification}` per candidate) is enforced
    by OpenAI's Responses API schema (`text_format=RankingResponse`), not
-   parsed-and-retried after the fact.
+   parsed-and-retried after the fact. `POST /recommend/batch` runs this
+   once per page (one re-rank call covering up to `batch_size` candidates)
+   rather than once per feed item, which is what actually makes a scrolling
+   feed affordable.
 3. **Guardrails** (`serving/guardrails.py`) — a rule-based check that blocks
    a specific ad from serving in the *current* context (e.g. no alcohol ads
    next to `sensitive`/`health`/`recovery` content). This is a different
    check from campaign policy review: guardrails run on every serve
    request against the live context; policy review runs once, at campaign
    creation, against the campaign's category in the abstract.
-4. **Serve** (`POST /recommend`) — the highest-ranked, guardrail-allowed
-   candidate is served; the full decision trace (candidates, rankings,
-   guardrail results, what was actually served) is returned and logged.
-5. **Feedback** (`POST /feedback`, `serving/feedback.py`) — a click/
-   no_click/conversion outcome for the served ad: nudges the user's profile
-   vector toward/away from the ad (re-normalized to unit length each time),
-   and debits the serving campaign's budget via an atomic SQL `UPDATE`
-   (`budget_spent = budget_spent + cost`, not a Python read-modify-write,
-   so concurrent feedback events can't lose each other's contribution — see
-   `feedback.py`'s `_debit_campaign_budget`). A campaign whose budget is
-   exhausted auto-transitions to `status=completed`, making it ineligible
-   for the next retrieval pass.
+4. **Serve** — `POST /recommend` returns a single highest-ranked,
+   guardrail-allowed candidate plus the full decision trace (candidates,
+   rankings, guardrail results, what was actually served); `POST
+   /recommend/batch` returns up to `batch_size` ranked, guardrail-allowed
+   ads in one call, for the feed. Impressions are logged separately (next
+   step) once an item actually scrolls into view — a batch being fetched
+   isn't the same as every item in it having been seen.
+5. **Events** (`serving/events_api.py`) — every impression and reaction is
+   logged to a Postgres `events` table (the real history; Pinecone only
+   ever holds current state, not a timeline):
+   - `POST /events/impression` — pure DB insert, no profile nudge, no cost.
+   - `POST /events/reaction` — `like`/`dislike`/`interested`. Logs the event
+     and nudges the user's profile vector toward/away from the ad
+     (re-normalized to unit length each time, `serving/feedback.py`);
+     `like`/`interested` also debit the serving campaign's budget via an
+     atomic SQL `UPDATE` (`budget_spent = budget_spent + cost`, not a
+     Python read-modify-write, so concurrent reactions can't lose each
+     other's contribution — see `feedback.py`'s `_debit_campaign_budget`).
+     A campaign whose budget is exhausted auto-transitions to
+     `status=completed`. There's no explicit "no reaction" event — silence
+     is simply the absence of a row, not a signal.
+   - `POST /events/report` — logs the event with a category (and reason, if
+     `category=other`), then counts total reports for that campaign
+     straight from the `events` table; crossing a flat threshold (default
+     3) auto-flips the campaign to `needs_review`. Deliberately simple for
+     now — see `docs/future_ideas.md` for the escalation-agent version this
+     is expected to motivate.
+   - `POST /users/{user_id}/do-not-show` — a permanent per-user exclusion,
+     not a learning signal: no profile nudge, no event logged, just an
+     addition to that user's blocklist (checked in step 1).
 
 ### Explainability / logging
 
@@ -163,8 +197,8 @@ was this campaign rejected" after the fact.
 ```
 backend/
 ├── app/
-│   ├── main.py                    # FastAPI entrypoint, wires both routers
-│   ├── models.py                   # SQLAlchemy: Advertiser, Campaign (shared)
+│   ├── main.py                    # FastAPI entrypoint, wires all routers
+│   ├── models.py                   # SQLAlchemy: Advertiser, Campaign, Event (shared)
 │   ├── schemas.py                   # Pydantic schemas (shared, see its module docstring)
 │   ├── policy/
 │   │   └── ad_policy.md              # company ad policy, served via MCP
@@ -174,9 +208,12 @@ backend/
 │   │   ├── queue.py                   # Redis connection + RQ queue
 │   │   ├── logging_utils.py           # structured JSON logging
 │   │   ├── embeddings.py              # OpenAI embeddings client
-│   │   └── vector_store.py            # generic Pinecone client + fetch/upsert
+│   │   └── vector_store.py            # generic Pinecone client + fetch/upsert/update
 │   ├── serving/                      # recommend an ad to a user
-│   │   ├── retrieval.py               # Pinecone query + campaign eligibility filter
+│   │   ├── api.py                     # POST /recommend, /recommend/batch
+│   │   ├── users.py                   # POST/GET /users, do-not-show (blocklist)
+│   │   ├── events_api.py              # impression/reaction/report endpoints
+│   │   ├── retrieval.py               # Pinecone query + eligibility + blocklist filter
 │   │   ├── ranking.py                 # LLM re-ranking (OpenAI Responses API)
 │   │   ├── guardrails.py              # brand-safety filtering (serve-time context)
 │   │   └── feedback.py                # profile-vector update + budget debit
@@ -190,7 +227,7 @@ backend/
 ├── alembic/                        # DB migrations
 ├── data/
 │   └── generate_personas.py        # synthetic user generation
-├── tests/                          # 42 tests — see README for how to run
+├── tests/                          # 60 tests — see README for how to run
 ├── scripts/
 │   └── simulate_feedback_rounds.py   # runs multi-round CTR demo
 ├── Dockerfile
@@ -203,8 +240,9 @@ backend/
 ## Demo artifacts
 
 - `scripts/simulate_feedback_rounds.py` — runs N rounds of recommend →
-  simulate click → update profile (`record_feedback`) → re-recommend, and
-  prints rolling CTR improving across rounds, plus one example decision
+  simulate a like reaction → update profile (`record_feedback`) →
+  re-recommend, and prints rolling CTR improving across rounds, plus one
+  example decision
   trace.
 - The campaign review flow itself is a demo artifact by inspection: submit
   a campaign, watch it get reviewed asynchronously, see the policy agent's
