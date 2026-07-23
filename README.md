@@ -21,7 +21,7 @@ See [`docs/spec.md`](docs/spec.md) for the full design.
 | Backend | FastAPI |
 | Frontend | React + Vite + TypeScript |
 | Reliability | `tenacity`, Pydantic, atomic SQL budget updates |
-| Testing | `pytest` (42 tests) |
+| Testing | `pytest` (60 tests) |
 | Deployment | Docker Compose locally → Railway/Render for production |
 
 ## Repo layout
@@ -31,7 +31,7 @@ adaptive-ad-recommender/
 ├── backend/
 │   ├── app/
 │   │   ├── core/       # shared infra: config, db, queue, embeddings, vector_store
-│   │   ├── serving/    # retrieve -> rerank -> guardrail -> serve -> feedback
+│   │   ├── serving/    # users -> retrieve -> rerank -> guardrail -> serve -> events
 │   │   └── campaigns/  # advertiser submits -> policy review -> moderation
 │   ├── mcp_servers/    # ad-policy MCP resource server
 │   ├── alembic/        # DB migrations
@@ -96,17 +96,39 @@ curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' -d '{
 }'
 # -> status=pending_review; the worker picks it up and reviews it within a few seconds
 
-# once approved (poll GET /campaigns/{id} or check the worker's logs), get a recommendation
+# no accounts/login -- a user is just a caller-supplied user_id. Create a
+# profile once (this is what retrieve/recommend reads back, it never embeds
+# raw text on its own):
+curl -X POST localhost:8000/users -H 'Content-Type: application/json' -d '{
+  "user_id": "demo-user-1",
+  "interest_summary": "need a plumber for a leaky faucet"
+}'
+
+# once the campaign's approved (poll GET /campaigns/{id} or check the worker's
+# logs), get a recommendation
 curl -X POST localhost:8000/recommend -H 'Content-Type: application/json' -d '{
-  "user_id": "need a plumber for a leaky faucet",
+  "user_id": "demo-user-1",
   "top_k": 5
 }'
 
-# record feedback on the served ad
-curl -X POST localhost:8000/feedback -H 'Content-Type: application/json' -d '{
-  "user_id": "need a plumber for a leaky faucet",
-  "ad_id": "<served_ad_id from above>",
-  "outcome": "click"
+# feed-facing version: one call returns a ranked batch instead of one ad
+curl -X POST localhost:8000/recommend/batch -H 'Content-Type: application/json' -d '{
+  "user_id": "demo-user-1",
+  "batch_size": 10
+}'
+
+# log an impression once a served ad actually scrolls into view
+curl -X POST localhost:8000/events/impression -H 'Content-Type: application/json' -d '{
+  "user_id": "demo-user-1",
+  "ad_id": "<served ad_id from above>"
+}'
+
+# react to the served ad -- like/dislike/interested; nudges the profile and
+# (for like/interested) debits the campaign's budget
+curl -X POST localhost:8000/events/reaction -H 'Content-Type: application/json' -d '{
+  "user_id": "demo-user-1",
+  "ad_id": "<served ad_id from above>",
+  "reaction": "like"
 }'
 ```
 
@@ -155,8 +177,9 @@ once, per above).
 ## Status
 
 Backend: both pipelines (campaign posting/review and ad serving/feedback)
-are built, tested (42 tests), and verified working end-to-end against real
-Postgres/Redis/Pinecone/OpenAI. Frontend is still a placeholder — no
-recommendation dashboard, decision-trace viewer, CTR chart, or moderator
-queue page yet; the system is currently only usable via the API directly
-(see the curl examples above).
+are built, tested (60 tests), and verified working end-to-end against real
+Postgres/Redis/Pinecone/OpenAI. See [`docs/next_phase_plan.md`](docs/next_phase_plan.md)
+for what's still in progress (performance dashboard, onboarding chat, demo
+seeding). Frontend is still a placeholder — no recommendation dashboard,
+decision-trace viewer, CTR chart, or moderator queue page yet; the system is
+currently only usable via the API directly (see the curl examples above).
