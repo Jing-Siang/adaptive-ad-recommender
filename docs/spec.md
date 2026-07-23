@@ -34,7 +34,7 @@ only exist because the system runs and accumulates data over time.
 | API layer | **FastAPI** |
 | Reliability | `tenacity` (retries/backoff, `reraise=True` so callers see the real exception), Pydantic (structured output validation), atomic SQL updates for budget (no read-modify-write) |
 | Observability | Structured (JSON) logging of every recommendation and review decision |
-| Testing | `pytest` — 66 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
+| Testing | `pytest` — 68 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
 | Deployment | Docker Compose (postgres, redis, backend, worker, frontend) → Railway or Render for production |
 
 ---
@@ -108,11 +108,21 @@ only exist because the system runs and accumulates data over time.
 1. **Retrieval** (`serving/retrieval.py`) — read the user's *stored* profile
    vector back out of Pinecone (never re-embeds anything at recommend time),
    query the `ads` namespace for the nearest matches (cosine similarity, no
-   LLM call), oversampling 3x top_k. Matches on the user's do-not-show
-   blocklist are dropped, then the rest are filtered against **Postgres**
-   (the source of truth, not Pinecone metadata): only campaigns that are
-   `status=active`, have `budget_spent < budget_total`, and are within their
-   `start_date`/`end_date` window are kept, down to top_k.
+   LLM call), oversampling 3x top_k. The user's do-not-show blocklist and
+   any campaign with an impression logged for them in the last hour
+   (suppressing an ad from reappearing during a scroll session -- time-boxed
+   rather than permanent, since a finite catalog would otherwise run out of
+   things to show) are excluded via a Pinecone query-time `$nin` filter on
+   the `campaign_id` metadata field, not a Python post-filter -- Pinecone's
+   serverless index merges the vector and metadata indexes into one, so it
+   searches past excluded IDs for real matches during the search itself,
+   rather than risking an already-fetched, fixed-size batch coming up short.
+   The surviving matches are then filtered against **Postgres** (the source
+   of truth, not Pinecone metadata): only campaigns that are `status=active`,
+   have `budget_spent < budget_total`, and are within their `start_date`/
+   `end_date` window are kept, down to top_k -- this check stays a
+   post-filter, since it can't move into Pinecone without duplicating
+   Postgres as a second source of truth for status/budget.
 2. **LLM re-ranking** (`serving/ranking.py`) — the surviving candidates +
    user context go to the LLM, which reasons about *intent*, not just
    vector similarity (e.g. someone reading about a leaky faucet wants a
@@ -235,7 +245,7 @@ backend/
 ├── data/
 │   ├── generate_personas.py        # synthetic user generation
 │   └── seed_campaigns.json         # versioned seed campaign catalog (~288 campaigns)
-├── tests/                          # 66 tests — see README for how to run
+├── tests/                          # 68 tests — see README for how to run
 ├── scripts/
 │   ├── simulate_feedback_rounds.py       # runs multi-round CTR demo
 │   ├── generate_seed_campaign_data.py    # LLM-generates data/seed_campaigns.json
