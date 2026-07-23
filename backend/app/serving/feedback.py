@@ -2,7 +2,7 @@ import numpy as np
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from app.core.vector_store import fetch_vector, upsert_vector
+from app.core.vector_store import fetch_vector, update_vector
 from app.models import Campaign
 from app.schemas import FeedbackEvent
 
@@ -51,19 +51,22 @@ def _debit_campaign_budget(db: Session, campaign_id: int, outcome: str) -> None:
 
 def record_feedback(db: Session, event: FeedbackEvent) -> list[float]:
     """Handle a served ad's feedback outcome end to end: nudge the user's profile
-    vector toward/away from the ad, and debit the campaign's budget."""
+    vector toward/away from the ad, and debit the campaign's budget.
+
+    Requires a profile to already exist -- feedback only ever fires on an ad
+    that was actually served, which itself requires a profile (see
+    retrieve_candidates), so a missing one here means the same kind of bug,
+    not a legitimate case to paper over."""
     ad_vector = fetch_vector(event.ad_id, namespace="ads")
     if ad_vector is None:
         raise ValueError(f"ad '{event.ad_id}' not found")
 
-    profile_vector = fetch_vector(event.user_id, namespace="users") or ad_vector
+    profile_vector = fetch_vector(event.user_id, namespace="users")
+    if profile_vector is None:
+        raise ValueError(f"no profile found for user '{event.user_id}' -- onboarding must run first")
+
     new_vector = update_profile_vector(profile_vector, ad_vector, event.outcome)
-    upsert_vector(
-        event.user_id,
-        new_vector,
-        metadata={"last_outcome": event.outcome, "last_ad_id": event.ad_id},
-        namespace="users",
-    )
+    update_vector(event.user_id, new_vector, namespace="users")
 
     _debit_campaign_budget(db, int(event.ad_id), event.outcome)
 

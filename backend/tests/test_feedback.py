@@ -92,9 +92,9 @@ def test_debit_campaign_budget_exhausts_and_completes(db, campaign):
 # --- record_feedback: mock Pinecone (fetch_vector/upsert_vector), real DB ---
 
 
-@patch("app.serving.feedback.upsert_vector")
+@patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_debits_budget_and_returns_new_vector(mock_fetch, mock_upsert, db, campaign):
+def test_record_feedback_debits_budget_and_returns_new_vector(mock_fetch, mock_update, db, campaign):
     campaign.budget_total = 10.0
     campaign.budget_spent = 0.0
     db.commit()
@@ -105,35 +105,37 @@ def test_record_feedback_debits_budget_and_returns_new_vector(mock_fetch, mock_u
     new_vector = record_feedback(db, event)
 
     assert new_vector is not None
-    mock_upsert.assert_called_once()
+    mock_update.assert_called_once()
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.50)
 
 
-@patch("app.serving.feedback.upsert_vector")
+@patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_cold_start_falls_back_to_ad_vector(mock_fetch, mock_upsert, db, campaign):
-    """If the user has no existing profile vector, start from the ad's own vector
-    rather than crashing or using a zero vector."""
+def test_record_feedback_raises_when_no_profile_exists(mock_fetch, mock_update, db, campaign):
+    """No fallback to the ad's own vector -- feedback only ever fires on an ad
+    that was actually served, which itself requires a profile to already
+    exist, so a missing one here is a bug, not a legitimate cold-start case."""
     campaign.budget_total = 10.0
     campaign.budget_spent = 0.0
     db.commit()
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else None
-    event = FeedbackEvent(user_id="pytest-cold-start-user", ad_id=str(campaign.id), outcome="click")
+    event = FeedbackEvent(user_id="pytest-user-with-no-profile", ad_id=str(campaign.id), outcome="click")
 
-    new_vector = record_feedback(db, event)
+    with pytest.raises(ValueError, match="no profile found"):
+        record_feedback(db, event)
 
-    assert new_vector is not None
+    mock_update.assert_not_called()
 
 
-@patch("app.serving.feedback.upsert_vector")
+@patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_raises_when_ad_not_found(mock_fetch, mock_upsert, db):
+def test_record_feedback_raises_when_ad_not_found(mock_fetch, mock_update, db):
     mock_fetch.return_value = None
     event = FeedbackEvent(user_id="pytest-user", ad_id="999999999", outcome="click")
 
     with pytest.raises(ValueError):
         record_feedback(db, event)
 
-    mock_upsert.assert_not_called()
+    mock_update.assert_not_called()

@@ -34,5 +34,15 @@ def fetch_metadata(vector_id: str, namespace: str) -> dict | None:
 
 
 def upsert_vector(vector_id: str, values: list[float], metadata: dict, namespace: str) -> None:
+    """Full record replace -- any metadata field not included here is wiped,
+    even if it existed before (Pinecone's documented upsert behavior). Use
+    for creating a record or intentionally replacing it wholesale."""
     index = get_index()
     index.upsert(vectors=[{"id": vector_id, "values": values, "metadata": metadata}], namespace=namespace)
+
+
+def update_vector(vector_id: str, values: list[float], namespace: str) -> None:
+    """Partial update -- only the vector values change; existing metadata
+    (e.g. a user's interest_summary) is left untouched, unlike upsert_vector."""
+    index = get_index()
+    index.update(id=vector_id, values=values, namespace=namespace)
