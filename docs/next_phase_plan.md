@@ -42,38 +42,54 @@ OpenAI SDK directly, not LangChain. Not just Q&A, though -- it uses
 retrieval and real reactions to build the profile, not only conversation
 text (see "Why this is RAG" below for the reasoning behind that).
 
-**Per turn, two calls**: (1) a streamed plain-text reply -- the visible,
-natural conversation, asking exploratory questions -- and (2) a separate,
-non-streamed, quick structured-output call that looks at the full
-conversation so far and returns `{ready_to_finish: bool, interest_summary:
-str}`. `interest_summary` is always populated, even a rough best-effort
-one, not only once "finished" -- structured output doesn't stream as
-readable text, which is why it's a second call kept out of the
-user-visible stream entirely.
+**Per turn, two calls, checkpoint first**: (1) `POST /onboarding/checkpoint`
+-- non-streamed structured output, `{show_candidates, ready_to_finish,
+interest_summary}` plus `candidates` if `show_candidates` fired -- then
+(2) `POST /onboarding/chat` -- the streamed, user-visible reply, told just
+`show_candidates: bool` for this turn (not the candidate details) so it can
+naturally acknowledge showing something without needing specifics.
+Checkpoint runs first specifically so chat can know whether this turn
+includes candidates.
 
-**The full flow**:
-1. Turn 1: chat opens with a broad question. User replies.
-2. **Checkpoint**: embed the current `interest_summary`, pull a few real
-   candidates via the existing `retrieve_candidates`, show them in the
-   chat as reactable cards ("here's a few things you might like"). The
-   very first checkpoint calls `POST /users` to seed the profile from this
-   embedding, since no profile exists yet at that point.
-3. User reacts (like/dislike) to the shown candidates. These reactions
-   *are* real feedback -- nudge the profile using the same
-   `update_profile_vector` logic `record_feedback` already uses for the
-   feed.
-4. Feed the shown candidates + how the user reacted to them back into the
-   chat's own context, so the *next generated question* is actually
-   informed by that (liked plumbing, disliked skincare -> ask about
-   DIY/home-repair specifically, not a generic follow-up).
-5. If reactions were confidently positive, wrap up soon. If mixed or
-   negative, ask 1-2 more clarifying questions, then repeat from step 2
-   with a refreshed `interest_summary`. **Capped at 3 checkpoint rounds
-   total** -- if still ambiguous after the third, finalize with whatever
-   profile exists rather than dragging on indefinitely.
+`show_candidates` is a separate gate from `ready_to_finish`: a single vague
+reply ("need to fix some things") shouldn't trigger a real checkpoint
+(embed + seed + Pinecone retrieval) just because a turn happened -- only a
+concrete, specific interest signal should. `ready_to_finish` can only be
+true once `show_candidates` has fired (this turn or an earlier one) --
+onboarding can't finish without ever having shown/tested a candidate.
+`interest_summary` is always populated, even a rough best-effort one.
+
+**The full flow (implemented)**:
+1. Turn 1: chat opens with a static, hardcoded question (no API call --
+   no point spending a call on a canned greeting). User replies.
+2. **Checkpoint**: judge `show_candidates`/`ready_to_finish`/
+   `interest_summary` from the conversation so far. If `show_candidates`
+   is false (signal still too vague), skip straight to step 5 -- no
+   embed/seed/retrieve call happens, the turn is just conversation.
+3. Once `show_candidates` fires: seed the profile (first time only --
+   embed `interest_summary`, equivalent to `POST /users`) and call the
+   existing `retrieve_candidates` for a few real candidates. Chat is told
+   `show_candidates=true` for this turn so its streamed reply can
+   naturally acknowledge that candidates are coming.
+4. Candidates are shown as reactable cards. Reactions go through the
+   *existing* `POST /events/reaction` (nudges the profile via
+   `record_feedback`, debits budget, logs the event -- no separate
+   onboarding-specific reaction endpoint). The client then folds the
+   reactions into an ordinary **user** message for the next turn (e.g.
+   "(I liked the plumbing ad, wasn't interested in the hardware store
+   one.)") -- real user-originated signal, just translated from taps to
+   text, not a synthetic message role or a server-side event-table
+   lookup (both considered and rejected as more machinery than needed).
+   This is what feeds retrieved content back into the next generation and
+   is what makes this RAG, not just retrieval (see below).
+5. If `ready_to_finish` comes back true, wrap up. Otherwise keep chatting
+   and re-checking each turn. **Capped at 3 real checkpoint rounds total**
+   (client-enforced, counting only turns where `show_candidates` fired) --
+   if still ambiguous after the third, finalize with whatever profile
+   exists rather than dragging on indefinitely.
 6. Once finished, transition to the feed. The profile already exists and
    is reaction-tested from the checkpoints -- no separate "finalize"
-   API call needed beyond what step 2 already did.
+   API call needed.
 
 **Why this is RAG, not just retrieval** (worth keeping the reasoning, not
 just the conclusion -- this was non-obvious): showing retrieved candidates
@@ -90,11 +106,15 @@ next generation. Skip step 4 and this stops being RAG; it'd just be
 retrieval with an extra UI step.
 
 **Other mechanics**:
-- Streaming: FastAPI `StreamingResponse`, consumed via `fetch` + a
-  `ReadableStream` reader on the frontend -- not `EventSource` (GET-only,
-  and this needs to POST conversation history), not WebSocket (that's for
-  genuinely bidirectional continuously-open connections; this is
-  one-directional, server to client, repeated per turn).
+- Streaming: FastAPI `StreamingResponse` wrapping a generator that filters
+  OpenAI's `response.output_text.delta` events out of the raw stream --
+  consumed via `fetch` + a `ReadableStream` reader on the frontend -- not
+  `EventSource` (GET-only, and this needs to POST conversation history),
+  not WebSocket (that's for genuinely bidirectional continuously-open
+  connections; this is one-directional, server to client, repeated per
+  turn). Deliberately not wrapped in `@retry` like other LLM calls in this
+  project -- a mid-stream failure can't be usefully retried the way a
+  single blocking call can.
 - Chat history is ephemeral (client-side only, never persisted
   server-side) -- only the profile vector built during checkpoints
   persists, via the same Pinecone upserts `record_feedback` already does.
@@ -265,9 +285,13 @@ Backend:
       per `docs/future_ideas.md` (confirmed, not pulled into this phase)
 - [x] Performance aggregation endpoint (CTR/engagement/dislike rate,
       spend, CPA, rolling trend, per-campaign breakdown) -- `GET /performance`
-- [ ] Streaming onboarding-chat endpoint (two calls per turn, as above)
-- [ ] Onboarding checkpoint logic: rough interest_summary every turn,
-      retrieve + return candidates for reactable cards, cap at 3 rounds
+- [x] Streaming onboarding-chat endpoint (two calls per turn, checkpoint
+      first) -- `POST /onboarding/chat`, `POST /onboarding/checkpoint`
+- [x] Onboarding checkpoint logic: `show_candidates` gate (separate from
+      `ready_to_finish`) so a vague reply doesn't trigger a real checkpoint,
+      seed-once + retrieve when it fires, cap at 3 real rounds
+      (client-enforced); reactions folded into ordinary user messages
+      rather than a synthetic role -- verified live end-to-end
 - [x] Demo data seeding script (real Advertiser/Campaign rows, skip LLM
       review, direct embed + index) -- split into
       `generate_seed_campaign_data.py` (LLM generation -> versioned
