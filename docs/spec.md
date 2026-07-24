@@ -314,6 +314,6 @@ backend/
   step for a fresh/different catalog.
 - The campaign review flow itself is a demo artifact by inspection: submit
   a campaign, watch it get reviewed asynchronously, see the policy agent's
-  reasoning in the `review_reason` field and structured logs. There's no
-  moderator-facing frontend page yet (see README status) — the moderator
-  queue is exercised via the API directly.
+  reasoning in the `review_reason` field and structured logs. The moderator
+  queue page (`frontend/src/pages/ModeratorPage.tsx`) surfaces this directly,
+  including `research_notes` when the reviewer used web search.

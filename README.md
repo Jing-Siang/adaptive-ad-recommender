@@ -19,7 +19,7 @@ See [`docs/spec.md`](docs/spec.md) for the full design.
 | Async job queue | Redis + RQ |
 | Agent framework | LangChain + MCP (`langchain-mcp-adapters`) |
 | Backend | FastAPI |
-| Frontend | React + Vite + TypeScript |
+| Frontend | React + Vite + TypeScript, Tailwind CSS, react-router-dom |
 | Reliability | `tenacity`, Pydantic, atomic SQL budget updates |
 | Testing | `pytest` (74 tests) |
 | Deployment | Docker Compose locally → Railway/Render for production |
@@ -38,8 +38,12 @@ adaptive-ad-recommender/
 │   ├── data/            # synthetic personas + versioned seed campaign catalog
 │   ├── tests/
 │   └── scripts/         # feedback-round + demo-catalog-seeding demo artifacts
-├── frontend/            # React + Vite + TS (placeholder, see Status)
+├── frontend/            # React + Vite + TS + Tailwind
 │   └── src/
+│       ├── pages/        # OnboardingFeedPage, PerformancePage, CampaignsPage, ModeratorPage
+│       ├── components/    # Feed, FeedCard, OnboardingChat, ReactionButtons, CtrTrendChart, …
+│       ├── api.ts         # fetch functions for every backend endpoint
+│       └── types.ts       # TS interfaces mirroring the backend's Pydantic schemas
 ├── docs/
 │   └── spec.md
 └── docker-compose.yml
@@ -162,7 +166,11 @@ npm install
 npm run dev
 ```
 
-Runs at `http://localhost:5173`.
+Runs at `http://localhost:5173`. For the onboarding chat / feed views to have
+real candidates to draw from, seed the demo catalog first (from `backend/`,
+with the venv active: `python -m scripts.generate_seed_campaign_data` once,
+then `python -m scripts.seed_demo_campaigns`) — an empty catalog just means
+an empty feed, not a broken one.
 
 ### Everything, via Docker Compose
 
@@ -180,7 +188,11 @@ Backend: fully built, tested (74 tests), and verified working end-to-end
 against real Postgres/Redis/Pinecone/OpenAI — campaign posting/review,
 ad serving/feedback, and the onboarding chat (see
 [`docs/next_phase_plan.md`](docs/next_phase_plan.md) for design details).
-Frontend is still a placeholder — no onboarding chat UI, feed, recommendation
-dashboard, decision-trace viewer, CTR chart, or moderator queue page yet;
-the system is currently only usable via the API directly (see the curl
-examples above).
+
+Frontend: all four views built — onboarding chat + feed (View 1),
+performance dashboard (View 2), campaign submission (View 3), and the
+moderator queue (View 4). Verified against the real backend via scripted
+integration tests hitting the actual endpoints in the same sequence the UI
+calls them (no browser was available in the session that built it, so
+rendering itself hasn't been visually confirmed yet — worth an eyeball pass
+with `npm run dev` before treating it as done).
