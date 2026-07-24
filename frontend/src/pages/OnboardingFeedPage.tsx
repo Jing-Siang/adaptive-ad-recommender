@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { OnboardingChat } from '../components/OnboardingChat'
+import { Feed } from '../components/Feed'
 
 function newUserId(): string {
   return crypto.randomUUID()
@@ -28,10 +29,7 @@ export function OnboardingFeedPage() {
       {mode === 'onboarding' ? (
         <OnboardingChat userId={userId} onFinish={() => setMode('feed')} />
       ) : (
-        <div className="mx-auto max-w-2xl p-6">
-          <h1 className="text-2xl font-semibold">Feed</h1>
-          <p className="mt-2 text-slate-600 dark:text-slate-400">Coming soon.</p>
-        </div>
+        <Feed userId={userId} />
       )}
     </div>
   )
