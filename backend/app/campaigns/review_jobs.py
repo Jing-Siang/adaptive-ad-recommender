@@ -38,6 +38,7 @@ def review_campaign_job(campaign_id: int) -> None:
 
         campaign.status = _STATUS_FOR_OUTCOME[decision.outcome]
         campaign.review_reason = decision.reason
+        campaign.research_notes = decision.research_notes
         campaign.excluded_categories = decision.excluded_categories or campaign.excluded_categories
         campaign.reviewed_by = REVIEWED_BY_AGENT
         campaign.reviewed_at = datetime.now(UTC)

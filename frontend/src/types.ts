@@ -126,6 +126,7 @@ export interface CampaignResponse {
   excluded_categories: string[]
   status: string
   review_reason: string | null
+  research_notes: string | null
   reviewed_by: string | null
   reviewed_at: string | null
   created_at: string

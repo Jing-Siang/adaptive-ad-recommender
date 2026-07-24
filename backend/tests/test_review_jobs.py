@@ -10,13 +10,16 @@ from app.schemas import ReviewDecision
 def test_review_campaign_job_approved_indexes_campaign(mock_review, mock_index, db, campaign):
     campaign.status = "pending_review"
     db.commit()
-    mock_review.return_value = ReviewDecision(outcome="approved", reason="looks fine", excluded_categories=[])
+    mock_review.return_value = ReviewDecision(
+        outcome="approved", reason="looks fine", excluded_categories=[], research_notes="found no conflicting claims"
+    )
 
     review_campaign_job(campaign.id)
 
     db.refresh(campaign)
     assert campaign.status == "active"
     assert campaign.review_reason == "looks fine"
+    assert campaign.research_notes == "found no conflicting claims"
     assert campaign.reviewed_by == "ai_policy_agent"
     assert campaign.reviewed_at is not None
     mock_index.assert_called_once()
@@ -35,6 +38,7 @@ def test_review_campaign_job_rejected_does_not_index(mock_review, mock_index, db
     db.refresh(campaign)
     assert campaign.status == "rejected"
     assert campaign.review_reason == "prohibited claim"
+    assert campaign.research_notes is None
     mock_index.assert_not_called()
 
 

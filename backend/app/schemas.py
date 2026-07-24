@@ -358,6 +358,7 @@ class CampaignResponse(BaseModel):
     excluded_categories: list[str]
     status: str
     review_reason: str | None
+    research_notes: str | None
     reviewed_by: str | None
     reviewed_at: datetime | None
     created_at: datetime

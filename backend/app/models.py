@@ -58,6 +58,7 @@ class Campaign(Base):
     # Review outcome — kept on this same row rather than a separate table
     status: Mapped[str] = mapped_column(String(20), default="pending_review")
     review_reason: Mapped[str | None] = mapped_column(String(1000), default=None)
+    research_notes: Mapped[str | None] = mapped_column(String(2000), default=None)
     reviewed_by: Mapped[str | None] = mapped_column(String(200), default=None)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
