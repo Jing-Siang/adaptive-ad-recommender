@@ -21,7 +21,7 @@ See [`docs/spec.md`](docs/spec.md) for the full design.
 | Backend | FastAPI |
 | Frontend | React + Vite + TypeScript |
 | Reliability | `tenacity`, Pydantic, atomic SQL budget updates |
-| Testing | `pytest` (68 tests) |
+| Testing | `pytest` (74 tests) |
 | Deployment | Docker Compose locally → Railway/Render for production |
 
 ## Repo layout
@@ -176,10 +176,11 @@ once, per above).
 
 ## Status
 
-Backend: both pipelines (campaign posting/review and ad serving/feedback)
-are built, tested (68 tests), and verified working end-to-end against real
-Postgres/Redis/Pinecone/OpenAI. See [`docs/next_phase_plan.md`](docs/next_phase_plan.md)
-for what's still in progress (the onboarding chat). Frontend is
-still a placeholder — no recommendation dashboard,
-decision-trace viewer, CTR chart, or moderator queue page yet; the system is
-currently only usable via the API directly (see the curl examples above).
+Backend: fully built, tested (74 tests), and verified working end-to-end
+against real Postgres/Redis/Pinecone/OpenAI — campaign posting/review,
+ad serving/feedback, and the onboarding chat (see
+[`docs/next_phase_plan.md`](docs/next_phase_plan.md) for design details).
+Frontend is still a placeholder — no onboarding chat UI, feed, recommendation
+dashboard, decision-trace viewer, CTR chart, or moderator queue page yet;
+the system is currently only usable via the API directly (see the curl
+examples above).

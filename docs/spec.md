@@ -34,7 +34,7 @@ only exist because the system runs and accumulates data over time.
 | API layer | **FastAPI** |
 | Reliability | `tenacity` (retries/backoff, `reraise=True` so callers see the real exception), Pydantic (structured output validation), atomic SQL updates for budget (no read-modify-write) |
 | Observability | Structured (JSON) logging of every recommendation and review decision |
-| Testing | `pytest` — 68 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
+| Testing | `pytest` — 74 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
 | Deployment | Docker Compose (postgres, redis, backend, worker, frontend) → Railway or Render for production |
 
 ---
@@ -175,6 +175,37 @@ only exist because the system runs and accumulates data over time.
    dislike-rate/spend/avg-CPA, a daily CTR trend line, and a per-campaign
    breakdown table. Aggregate across all activity, not scoped to a
    `user_id` — this is a window into the engine, not one person's feed.
+7. **Onboarding chat** (`serving/onboarding_api.py`) — how a new user gets a
+   profile in the first place, before ever reaching step 1. Two calls per
+   turn, checkpoint first:
+   - `POST /onboarding/checkpoint` — non-streamed structured output:
+     `show_candidates` (is there concrete enough signal yet to suggest
+     specific ads, separate from `ready_to_finish` — a single vague reply
+     shouldn't trigger an embed/seed/retrieve call), `ready_to_finish`
+     (can only be true once `show_candidates` has fired), and a
+     best-effort `interest_summary`. The first time `show_candidates`
+     fires, seeds the profile (equivalent to `POST /users`); every time,
+     calls `retrieve_candidates` for a few real candidates.
+   - `POST /onboarding/chat` — the streamed, user-visible reply (raw
+     OpenAI SDK, `response.output_text.delta` events piped through a
+     `StreamingResponse`; no `@retry`, since a mid-stream failure can't be
+     usefully retried the way a single blocking call can). Told just
+     `show_candidates: bool` for the turn — enough to naturally
+     acknowledge showing candidates without needing their specifics.
+     Checkpoint runs first specifically so this call can know that flag.
+   - Candidates are shown as reactable cards; reactions go through the
+     *existing* `POST /events/reaction` (no dedicated onboarding reaction
+     path). The client folds the reaction into an ordinary **user**
+     message for the next turn (e.g. "(I liked X, wasn't interested in
+     Y)") — real user-originated signal, just translated from taps to
+     text, not a synthetic message role. That's what feeds retrieved
+     content back into the next generation, which is what makes this RAG
+     rather than plain retrieval: showing candidates and getting a
+     reaction isn't RAG by itself; it becomes RAG when that reaction and
+     the ads' real content shape what gets generated next.
+   - Chat history is ephemeral (client-owned, never persisted
+     server-side); the checkpoint round cap (3) is client-enforced, not a
+     server-side limit.
 
 ### Explainability / logging
 
@@ -230,6 +261,7 @@ backend/
 │   │   ├── users.py                   # POST/GET /users, do-not-show (blocklist)
 │   │   ├── events_api.py              # impression/reaction/report endpoints
 │   │   ├── performance_api.py          # GET /performance dashboard aggregation
+│   │   ├── onboarding_api.py            # POST /onboarding/chat, /onboarding/checkpoint
 │   │   ├── retrieval.py               # Pinecone query + eligibility + blocklist filter
 │   │   ├── ranking.py                 # LLM re-ranking (OpenAI Responses API)
 │   │   ├── guardrails.py              # brand-safety filtering (serve-time context)
@@ -245,7 +277,7 @@ backend/
 ├── data/
 │   ├── generate_personas.py        # synthetic user generation
 │   └── seed_campaigns.json         # versioned seed campaign catalog (~288 campaigns)
-├── tests/                          # 68 tests — see README for how to run
+├── tests/                          # 74 tests — see README for how to run
 ├── scripts/
 │   ├── simulate_feedback_rounds.py       # runs multi-round CTR demo
 │   ├── generate_seed_campaign_data.py    # LLM-generates data/seed_campaigns.json
