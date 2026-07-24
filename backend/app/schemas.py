@@ -181,6 +181,68 @@ class DoNotShowRequest(BaseModel):
     ad_id: str
 
 
+class ChatMessage(BaseModel):
+    """One turn in the onboarding chat. Chat history is ephemeral -- the
+    client owns and resends the full list each call, nothing is persisted
+    server-side (see serving/onboarding_api.py). Reactions to shown
+    candidates are folded in as ordinary "user" messages (e.g. "(I liked
+    the Plumbing ad, wasn't interested in the Hardware store one.)") --
+    they're real user-originated signal, just translated from taps to
+    text, not a synthetic role. That's what feeds retrieved content back
+    into the next generation and makes this RAG, not just retrieval."""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class OnboardingChatRequest(BaseModel):
+    """Request body for POST /onboarding/chat -- the streamed, user-visible
+    conversational turn. No user_id needed: this call touches no DB/Pinecone
+    state, it's pure conversation over whatever history the client sends.
+    show_candidates is this turn's checkpoint result (call /onboarding/checkpoint
+    first) -- lets the reply naturally acknowledge that candidates are being
+    shown without needing their specific details."""
+
+    messages: list[ChatMessage]
+    show_candidates: bool = False
+
+
+class OnboardingCheckpointRequest(BaseModel):
+    """Request body for POST /onboarding/checkpoint -- the non-streamed,
+    structured-output side of a turn. Call this *before* /onboarding/chat:
+    looks at the conversation so far, decides whether there's concrete
+    enough signal to show candidates yet, seeds the profile the first time
+    that happens, and pulls real candidates."""
+
+    user_id: str
+    messages: list[ChatMessage]
+
+
+class CheckpointJudgment(BaseModel):
+    """Structured output the checkpoint LLM call returns. show_candidates is
+    a separate gate from ready_to_finish -- a single vague reply shouldn't
+    trigger a real checkpoint (embed + Pinecone retrieval) just because a
+    turn happened; only once there's a concrete, specific interest signal.
+    ready_to_finish can only be true once show_candidates has been true (in
+    this turn or an earlier one) -- onboarding can't finish without ever
+    having shown/tested a candidate."""
+
+    show_candidates: bool
+    ready_to_finish: bool
+    interest_summary: str
+
+
+class OnboardingCheckpointResponse(CheckpointJudgment):
+    """Response body for POST /onboarding/checkpoint. candidates is empty
+    unless show_candidates is true. When shown, they're reactable cards --
+    the client logs an impression per card (same POST /events/impression the
+    feed uses) and a reaction per response (POST /events/reaction), then
+    folds the reactions into the next /onboarding/chat call as an ordinary
+    user message (see ChatMessage)."""
+
+    candidates: list[AdCandidate]
+
+
 class PerformanceTotals(BaseModel):
     """Aggregate metrics across all events, all campaigns -- this dashboard
     is a window into the engine, not any one user's feed, so nothing here is
