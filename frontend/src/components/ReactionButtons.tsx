@@ -21,13 +21,10 @@ export function ReactionButtons({
           key={reaction}
           type="button"
           onClick={() => onReact(reaction)}
-          disabled={selected !== null}
-          className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition disabled:cursor-default ${
+          className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
             selected === reaction
-              ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-950/40 dark:text-indigo-300'
-              : selected !== null
-                ? 'border-slate-200 text-slate-400 dark:border-slate-800 dark:text-slate-600'
-                : 'border-slate-300 text-slate-700 hover:border-indigo-400 hover:text-indigo-600 dark:border-slate-700 dark:text-slate-300'
+              ? 'border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
+              : 'border-stone-300 text-stone-700 hover:border-stone-900 hover:text-stone-900 dark:border-stone-700 dark:text-stone-300 dark:hover:border-stone-100 dark:hover:text-stone-100'
           }`}
         >
           <Icon size={14} />

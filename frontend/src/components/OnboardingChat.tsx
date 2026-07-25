@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { ArrowUp } from 'lucide-react'
 import {
   logImpression,
   onboardingCheckpoint,
@@ -10,6 +11,7 @@ import { ReactionButtons } from './ReactionButtons'
 
 const OPENING_MESSAGE = "Hi! What are you into these days?"
 const MAX_CHECKPOINT_ROUNDS = 3
+const TEXTAREA_MAX_HEIGHT = 160 // px
 
 interface DisplayTurn {
   role: 'user' | 'assistant'
@@ -42,6 +44,7 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -49,8 +52,28 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
+  useEffect(() => {
+    if (!busy) textareaRef.current?.focus()
+  }, [busy])
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`
+    el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
+  }, [input])
+
   async function handleReact(adId: string, reaction: Reaction) {
-    setReactions((r) => ({ ...r, [adId]: reaction }))
+    const isUnchecking = reactions[adId] === reaction
+    setReactions((r) => {
+      if (!isUnchecking) return { ...r, [adId]: reaction }
+      const { [adId]: _removed, ...rest } = r
+      return rest
+    })
+    // Unchecking only clears local UI state -- there's no backend endpoint to
+    // undo a reaction, so there's nothing to send in that case.
+    if (isUnchecking) return
     try {
       await sendReaction(userId, adId, reaction)
     } catch (err) {
@@ -63,11 +86,13 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
     const text = input.trim()
     if (!reactionNote && !text) return
 
+    // The reaction note is sent to the model (so it has real signal to react
+    // to) but never shown in the chat itself -- the user already saw/reacted
+    // to the cards, restating it as a chat bubble would just be noise.
     const newMessages: ChatMessage[] = [...apiMessages]
     const newTurns: DisplayTurn[] = [...displayTurns]
     if (reactionNote) {
       newMessages.push({ role: 'user', content: reactionNote })
-      newTurns.push({ role: 'user', content: reactionNote })
     }
     if (text) {
       newMessages.push({ role: 'user', content: text })
@@ -115,29 +140,43 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
     }
   }
 
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (!busy) handleSubmit()
+    }
+  }
+
   const canFinish = readyToFinish || checkpointRounds >= MAX_CHECKPOINT_ROUNDS
+  const canSubmit = !busy && (input.trim().length > 0 || describeReactions(lastCandidates, reactions) !== null)
 
   return (
-    <div className="mx-auto flex h-[calc(100svh-56px)] max-w-2xl flex-col p-6">
-      <div className="flex-1 space-y-4 overflow-y-auto">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pt-6">
+      {/* px-4 (16px) matches the composer's rounded-2xl corner radius, so
+          the message column lines up with where its straight edge starts
+          rather than its curved corner. */}
+      <div className="flex-1 space-y-5 px-4 pb-4">
         {displayTurns.map((turn, i) => (
-          <div key={i} className={turn.role === 'user' ? 'text-right' : 'text-left'}>
-            <div
-              className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                turn.role === 'user'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
-              }`}
-            >
-              {turn.content}
-            </div>
+          <div
+            key={i}
+            className={`${turn.role === 'user' ? 'flex justify-end' : ''} ${
+              turn.role === 'user' && i > 0 ? 'mt-8' : ''
+            }`}
+          >
+            {turn.role === 'user' ? (
+              <div className="max-w-[85%] rounded-2xl bg-stone-200 px-4 py-2.5 leading-relaxed text-stone-900 dark:bg-stone-700 dark:text-stone-100">
+                {turn.content}
+              </div>
+            ) : (
+              <div className="max-w-full leading-relaxed text-stone-800 dark:text-stone-200">{turn.content}</div>
+            )}
             {turn.candidates && turn.candidates.length > 0 && (
-              <div className="mt-2 space-y-2 text-left">
+              <div className="mt-3 space-y-2">
                 {turn.candidates.map((c) => (
-                  <div key={c.ad_id} className="rounded border border-slate-200 p-3 dark:border-slate-800">
-                    <p className="text-sm font-medium">{c.headline}</p>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">{c.description}</p>
-                    <div className="mt-2">
+                  <div key={c.ad_id} className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
+                    <p className="font-medium">{c.headline}</p>
+                    <p className="mt-0.5 text-sm text-stone-600 dark:text-stone-400">{c.description}</p>
+                    <div className="mt-2.5">
                       <ReactionButtons
                         selected={reactions[c.ad_id] ?? null}
                         onReact={(r) => handleReact(c.ad_id, r)}
@@ -150,46 +189,63 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
           </div>
         ))}
         {streamingText !== null && (
-          <div className="text-left">
-            <div className="inline-block max-w-[85%] rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-900 dark:bg-slate-800 dark:text-slate-100">
-              {streamingText || '…'}
-            </div>
-          </div>
+          <div className="max-w-full leading-relaxed text-stone-800 dark:text-stone-200">{streamingText || '…'}</div>
         )}
         <div ref={bottomRef} />
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {/* Sticky, not internally scrollable -- the page's own scroll (main,
+          in App.tsx) is the only scroll container here, matching how the
+          Claude chat app scrolls the whole conversation pane and just
+          docks the composer to the bottom of it. */}
+      <div className="sticky bottom-0">
+        {/* Fades scrolling content out before it disappears under the solid
+            bar below, instead of a hard cutoff. */}
+        <div className="pointer-events-none h-6 bg-gradient-to-t from-stone-50 to-transparent dark:from-stone-900" />
+        <div className="bg-stone-50 pb-6 dark:bg-stone-900">
+          {error && <p className="pb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {canFinish && (
-        <button
-          type="button"
-          onClick={onFinish}
-          className="mt-3 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          Continue to your feed →
-        </button>
-      )}
-
-      <div className="mt-3 flex gap-2">
-        <input
-          value={input}
-          disabled={busy}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !busy) handleSubmit()
-          }}
-          placeholder="Type a reply…"
-          className="flex-1 rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-        />
-        <button
-          type="button"
-          disabled={busy}
-          onClick={handleSubmit}
-          className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          Send
-        </button>
+          {canFinish ? (
+            <button
+              type="button"
+              onClick={onFinish}
+              className="w-full rounded-2xl bg-stone-900 py-3 text-sm font-medium text-white shadow-sm hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-300"
+            >
+              Continue to your feed →
+            </button>
+          ) : (
+            <div className="flex items-end gap-2 rounded-2xl border border-stone-300 bg-white py-2 pl-4 pr-2 shadow-sm dark:border-stone-700 dark:bg-stone-800">
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={input}
+                disabled={busy}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type a reply…"
+                style={{ maxHeight: TEXTAREA_MAX_HEIGHT }}
+                className="thin-scrollbar block max-h-40 flex-1 resize-none bg-transparent py-2 leading-relaxed outline-none"
+              />
+              {/* items-end on the row pins the button to the box's bottom edge,
+                  which stays put in the viewport as the box grows upward --
+                  it's a plain flex sibling now, not overlaid on the textarea,
+                  so the textarea's own scrollbar never sits under it. */}
+              <button
+                type="button"
+                disabled={!canSubmit}
+                onClick={handleSubmit}
+                aria-label="Send"
+                className={`mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${
+                  canSubmit
+                    ? 'bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-300'
+                    : 'bg-stone-200 text-stone-400 dark:bg-stone-700 dark:text-stone-500'
+                }`}
+              >
+                <ArrowUp size={16} />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
