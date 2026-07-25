@@ -17,7 +17,7 @@ export function OnboardingFeedPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-full flex-col">
       <div className="sticky top-0 z-10">
         <div className="flex justify-end bg-stone-50 px-6 pt-4 dark:bg-stone-900">
           <button
