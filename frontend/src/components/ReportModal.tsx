@@ -23,7 +23,7 @@ export function ReportModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-sm rounded bg-white p-4 dark:bg-slate-900"
+        className="w-full max-w-sm rounded bg-white p-4 dark:bg-stone-800"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="font-semibold">Report this ad</h3>
@@ -46,14 +46,14 @@ export function ReportModal({
             onChange={(e) => setReason(e.target.value)}
             placeholder="Tell us more…"
             rows={2}
-            className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+            className="mt-2 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-800"
           />
         )}
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            className="rounded px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"
           >
             Cancel
           </button>

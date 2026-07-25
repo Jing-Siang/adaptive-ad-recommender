@@ -29,7 +29,7 @@ export function PerformancePage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-5xl p-6">
+      <div className="mx-auto max-w-6xl p-6">
         <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
       </div>
     )
@@ -37,8 +37,8 @@ export function PerformancePage() {
 
   if (!data) {
     return (
-      <div className="mx-auto max-w-5xl p-6">
-        <p className="text-sm text-slate-600 dark:text-slate-400">Loading…</p>
+      <div className="mx-auto max-w-6xl p-6">
+        <p className="text-sm text-stone-600 dark:text-stone-400">Loading…</p>
       </div>
     )
   }
@@ -46,10 +46,10 @@ export function PerformancePage() {
   const { totals, trend, campaigns } = data
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-6">
+    <div className="mx-auto max-w-6xl space-y-8 p-6">
       <div>
         <h1 className="text-2xl font-semibold">Performance</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+        <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">
           Aggregate across all activity, not scoped to one user — a window into the engine, not one person's feed.
         </p>
       </div>
@@ -63,19 +63,19 @@ export function PerformancePage() {
         <StatTile label="Avg. CPA" value={totals.avg_cpa === null ? '—' : formatUsd(totals.avg_cpa)} />
       </div>
 
-      <div className="rounded border border-slate-200 p-4 dark:border-slate-800">
+      <div className="rounded border border-stone-200 p-4 dark:border-stone-700">
         <CtrTrendChart data={trend} />
       </div>
 
       <div>
         <h2 className="text-lg font-semibold">Per-campaign breakdown</h2>
         {campaigns.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">No campaigns yet.</p>
+          <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">No campaigns yet.</p>
         ) : (
           <div className="mt-2 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
                   <th className="py-2 pr-4">Campaign</th>
                   <th className="py-2 pr-4">Status</th>
                   <th className="py-2 pr-4">Impr.</th>
@@ -91,7 +91,7 @@ export function PerformancePage() {
                 {[...campaigns]
                   .sort((a, b) => b.impressions - a.impressions)
                   .map((c) => (
-                    <tr key={c.campaign_id} className="border-b border-slate-100 dark:border-slate-900">
+                    <tr key={c.campaign_id} className="border-b border-stone-100 dark:border-stone-900">
                       <td className="py-2 pr-4 font-medium">{c.headline}</td>
                       <td className="py-2 pr-4">
                         <StatusBadge status={c.status} />

@@ -63,18 +63,18 @@ export function Feed({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-6">
+    <div className="mx-auto max-w-6xl space-y-4 p-6">
       {items.map((item) => (
         <FeedCard key={item.ad_id} item={item} userId={userId} onHidden={hideItem} />
       ))}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {!exhausted && <div ref={sentinelRef} className="h-4" />}
-      {loading && <p className="text-center text-sm text-slate-500 dark:text-slate-500">Loading more…</p>}
+      {loading && <p className="text-center text-sm text-stone-500 dark:text-stone-500">Loading more…</p>}
       {exhausted && items.length === 0 && (
-        <p className="text-center text-sm text-slate-500 dark:text-slate-500">Nothing to show right now.</p>
+        <p className="text-center text-sm text-stone-500 dark:text-stone-500">Nothing to show right now.</p>
       )}
       {exhausted && items.length > 0 && (
-        <p className="text-center text-sm text-slate-500 dark:text-slate-500">You're all caught up.</p>
+        <p className="text-center text-sm text-stone-500 dark:text-stone-500">You're all caught up.</p>
       )}
     </div>
   )

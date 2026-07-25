@@ -35,7 +35,7 @@ export function CtrTrendChart({ data }: { data: PerformanceTrendPoint[] }) {
   }, [data])
 
   if (data.length === 0) {
-    return <p className="text-sm text-slate-600 dark:text-slate-400">No activity yet.</p>
+    return <p className="text-sm text-stone-600 dark:text-stone-400">No activity yet.</p>
   }
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
@@ -79,13 +79,13 @@ export function CtrTrendChart({ data }: { data: PerformanceTrendPoint[] }) {
         }
       `}</style>
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-sm text-slate-500 dark:text-slate-500">
+        <p className="text-sm text-stone-500 dark:text-stone-500">
           Rolling CTR by day (conversions ÷ impressions)
         </p>
         <button
           type="button"
           onClick={() => setShowTable((v) => !v)}
-          className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+          className="text-xs font-medium text-stone-900 hover:underline dark:text-stone-100"
         >
           {showTable ? 'Show chart' : 'Show table'}
         </button>
@@ -95,7 +95,7 @@ export function CtrTrendChart({ data }: { data: PerformanceTrendPoint[] }) {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
                 <th className="py-1.5 pr-4">Date</th>
                 <th className="py-1.5 pr-4">Impressions</th>
                 <th className="py-1.5 pr-4">Conversions</th>
@@ -104,7 +104,7 @@ export function CtrTrendChart({ data }: { data: PerformanceTrendPoint[] }) {
             </thead>
             <tbody className="[font-variant-numeric:tabular-nums]">
               {data.map((d) => (
-                <tr key={d.date} className="border-b border-slate-100 dark:border-slate-900">
+                <tr key={d.date} className="border-b border-stone-100 dark:border-stone-900">
                   <td className="py-1.5 pr-4">{d.date}</td>
                   <td className="py-1.5 pr-4">{d.impressions}</td>
                   <td className="py-1.5 pr-4">{d.conversions}</td>
@@ -184,9 +184,9 @@ export function CtrTrendChart({ data }: { data: PerformanceTrendPoint[] }) {
       )}
 
       {hovered && (
-        <div className="mt-1 inline-block rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <span className="font-medium text-slate-900 dark:text-slate-100">{formatPct(hovered.point.ctr)}</span>{' '}
-          <span className="text-slate-500 dark:text-slate-500">
+        <div className="mt-1 inline-block rounded border border-stone-200 bg-white px-2 py-1 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-800">
+          <span className="font-medium text-stone-900 dark:text-stone-100">{formatPct(hovered.point.ctr)}</span>{' '}
+          <span className="text-stone-500 dark:text-stone-500">
             on {formatDate(hovered.point.date)} · {hovered.point.impressions} impressions, {hovered.point.conversions}{' '}
             conversions
           </span>
