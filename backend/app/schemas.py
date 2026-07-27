@@ -199,12 +199,16 @@ class OnboardingChatRequest(BaseModel):
     """Request body for POST /onboarding/chat -- the streamed, user-visible
     conversational turn. No user_id needed: this call touches no DB/Pinecone
     state, it's pure conversation over whatever history the client sends.
-    show_candidates is this turn's checkpoint result (call /onboarding/checkpoint
-    first) -- lets the reply naturally acknowledge that candidates are being
-    shown without needing their specific details."""
+    candidates/ready_to_finish are this turn's checkpoint result (call
+    /onboarding/checkpoint first): candidates (if any) are fed back to the
+    model in full so it can naturally reference what they actually are,
+    rather than just knowing a candidates-were-shown boolean. ready_to_finish
+    tells the model to wrap up and guide the user to their feed instead of
+    asking another question."""
 
     messages: list[ChatMessage]
-    show_candidates: bool = False
+    candidates: list[AdCandidate] = []
+    ready_to_finish: bool = False
 
 
 class OnboardingCheckpointRequest(BaseModel):
@@ -234,8 +238,10 @@ class CheckpointJudgment(BaseModel):
 
 class OnboardingCheckpointResponse(CheckpointJudgment):
     """Response body for POST /onboarding/checkpoint. candidates is empty
-    unless show_candidates is true. When shown, they're reactable cards --
-    the client logs an impression per card (same POST /events/impression the
+    unless show_candidates is true, and always empty when ready_to_finish is
+    true (no point previewing a fresh batch right before handing the user
+    off to their full feed). When shown, they're reactable cards -- the
+    client logs an impression per card (same POST /events/impression the
     feed uses) and a reaction per response (POST /events/reaction), then
     folds the reactions into the next /onboarding/chat call as an ordinary
     user message (see ChatMessage)."""

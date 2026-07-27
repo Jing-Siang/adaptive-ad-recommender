@@ -113,10 +113,16 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
 
       abortRef.current = new AbortController()
       let fullReply = ''
-      await streamOnboardingChat(newMessages, checkpoint.show_candidates, (chunk) => {
-        fullReply += chunk
-        setStreamingText(fullReply)
-      }, abortRef.current.signal)
+      await streamOnboardingChat(
+        newMessages,
+        checkpoint.show_candidates ? checkpoint.candidates : [],
+        checkpoint.ready_to_finish,
+        (chunk) => {
+          fullReply += chunk
+          setStreamingText(fullReply)
+        },
+        abortRef.current.signal,
+      )
 
       setApiMessages((msgs) => [...msgs, { role: 'assistant', content: fullReply }])
       setDisplayTurns((turns) => [

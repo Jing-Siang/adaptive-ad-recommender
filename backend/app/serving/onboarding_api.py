@@ -34,9 +34,7 @@ _CHAT_SYSTEM_PROMPT = """You are a friendly onboarding assistant helping a new u
 ads/products they might be interested in. Ask short, natural, exploratory questions -- one or two at a \
 time, conversational tone, not a formal survey. The user's messages sometimes describe how they reacted to \
 ads you showed them (e.g. "I liked X, wasn't interested in Y") -- treat that as real signal about their \
-taste and let it inform your next question, don't just ignore it. If you are told candidates are being \
-shown to the user this turn, naturally acknowledge that (e.g. "here's a few things that might interest \
-you") without needing to know their specific details."""
+taste and let it inform your next question, don't just ignore it."""
 
 
 @router.post("/chat")
@@ -47,8 +45,21 @@ def onboarding_chat(request: OnboardingChatRequest) -> StreamingResponse:
     usefully retried the way a single blocking call can (the client would
     need to handle a partial response either way)."""
     instructions = _CHAT_SYSTEM_PROMPT
-    if request.show_candidates:
-        instructions += "\n\nYou are showing the user a few candidate ads right after this reply."
+    if request.ready_to_finish:
+        instructions += (
+            "\n\nThe user is ready to move on -- do not ask another question, and do not mention showing "
+            "more candidates. Give a short, warm closing reply letting them know their personalized feed "
+            "is ready, and invite them to go check it out."
+        )
+    elif request.candidates:
+        candidate_lines = "\n".join(
+            f'- "{c.headline}": {c.description} (category: {c.category})' for c in request.candidates
+        )
+        instructions += (
+            f"\n\nYou are showing the user these candidate ads right after this reply:\n{candidate_lines}\n"
+            "Naturally acknowledge what they're about in your reply (briefly, in your own words -- don't "
+            "just list them back verbatim)."
+        )
 
     def _stream():
         stream = _get_client().responses.create(
@@ -66,12 +77,13 @@ def onboarding_chat(request: OnboardingChatRequest) -> StreamingResponse:
 
 _CHECKPOINT_PROMPT = """Given the onboarding conversation so far, decide three things:
 1. show_candidates: is there concrete enough signal yet (a specific interest, not just vague words like \
-"stuff" or "things") to suggest specific ads worth showing? If the user has only been vague so far, this \
-should be false -- don't force it.
-2. ready_to_finish: true only if show_candidates is also true AND (if candidates were already shown earlier \
-in this conversation, per any messages describing reactions) those reactions were clearly positive. Never \
-true if show_candidates is false in this same turn -- onboarding can't finish without ever having shown or \
-tested a candidate.
+"stuff" or "things") to suggest specific ads worth showing right now? If the user has only been vague so \
+far, this should be false -- don't force it. Also false if onboarding is ready to finish (see \
+ready_to_finish) -- no need for a fresh candidate preview right before handing the user off to their full feed.
+2. ready_to_finish: true once candidates were shown in an earlier turn (per messages describing reactions) \
+and those reactions were clearly positive. This can be true even when show_candidates is false this turn --
+finishing doesn't require showing a fresh batch of candidates on the same turn, only having already shown \
+and tested at least one earlier.
 3. interest_summary: a best-effort description of what this user seems interested in so far, even if still \
 vague or early -- always populate this, never leave it empty."""
 
@@ -98,7 +110,10 @@ def onboarding_checkpoint(
     judgment = _judge_checkpoint([m.model_dump() for m in request.messages])
 
     candidates = []
-    if judgment.show_candidates:
+    # Belt-and-suspenders alongside the prompt's own guidance: never surface a
+    # fresh candidate batch on the same turn onboarding is wrapping up, even
+    # if the judge call still returns both flags true.
+    if judgment.show_candidates and not judgment.ready_to_finish:
         if fetch_vector(request.user_id, namespace="users") is None:
             vector = embed_query([judgment.interest_summary])[0]
             upsert_vector(
