@@ -51,33 +51,51 @@ adaptive-ad-recommender/
 
 ## Local development
 
+Common commands are wrapped in a `Makefile` — run `make help` for the full
+list. `make` is Linux/macOS-native; on Windows, run it from WSL rather than
+cmd.exe/PowerShell (the stack already assumes Docker + a Python venv +
+bash-style commands, so WSL is the natural fit there too). Each step below
+shows the `make` target alongside the raw command, for whichever you prefer.
+
 ### 1. Start Postgres + Redis
 
 ```bash
-docker compose up -d postgres redis
+make infra
+# equivalent to: docker compose up -d postgres redis
 ```
 
 ### 2. Backend setup
 
 ```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in OPENAI_API_KEY, PINECONE_API_KEY
-alembic upgrade head    # creates the advertisers/campaigns tables
+make install-backend
+# equivalent to: cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+```
+
+```bash
+cd backend && cp .env.example .env   # fill in OPENAI_API_KEY, PINECONE_API_KEY
 ```
 
 The Pinecone index itself isn't created automatically — create one (1536
 dimensions, cosine metric, matching `text-embedding-3-small`) via the
 Pinecone console or SDK before running anything that embeds/retrieves.
 
+```bash
+make migrate
+# equivalent to: cd backend && source .venv/bin/activate && alembic upgrade head
+```
+
+Creates the advertisers/campaigns tables.
+
 ### 3. Run the backend + worker (two processes)
 
 ```bash
 # terminal 1
-uvicorn app.main:app --reload
+make backend
+# equivalent to: cd backend && source .venv/bin/activate && uvicorn app.main:app --reload
+
 # terminal 2
-rq worker --url redis://localhost:6379 campaign_review
+make worker
+# equivalent to: cd backend && source .venv/bin/activate && rq worker --url redis://localhost:6379 campaign_review
 ```
 
 The API runs at `http://localhost:8000` (interactive docs at `/docs`). The
@@ -150,32 +168,38 @@ curl -X POST localhost:8000/campaigns/<id>/moderate -H 'Content-Type: applicatio
 ### Tests
 
 ```bash
-cd backend && source .venv/bin/activate && pytest
+make test
+# equivalent to: cd backend && source .venv/bin/activate && pytest
 ```
 
 Runs against the real dev Postgres (not SQLite — see `docs/spec.md` on why)
-and mocks OpenAI/Pinecone/MCP at their boundaries; needs `docker compose up
--d postgres redis` running first.
+and mocks OpenAI/Pinecone/MCP at their boundaries; needs `make infra` running
+first.
 
 ### Frontend
 
 ```bash
-cd frontend
-cp .env.example .env
-npm install
-npm run dev
+cd frontend && cp .env.example .env
+make install-frontend   # equivalent to: cd frontend && npm install
+make frontend            # equivalent to: cd frontend && npm run dev
 ```
 
 Runs at `http://localhost:5173`. For the onboarding chat / feed views to have
-real candidates to draw from, seed the demo catalog first (from `backend/`,
-with the venv active: `python -m scripts.generate_seed_campaign_data` once,
-then `python -m scripts.seed_demo_campaigns`) — an empty catalog just means
-an empty feed, not a broken one.
+real candidates to draw from, seed the demo catalog first:
+
+```bash
+make seed
+# equivalent to: cd backend && source .venv/bin/activate &&
+#   python -m scripts.generate_seed_campaign_data && python -m scripts.seed_demo_campaigns
+```
+
+An empty catalog just means an empty feed, not a broken one.
 
 ### Everything, via Docker Compose
 
 ```bash
-docker compose up --build
+make docker-up
+# equivalent to: docker compose up --build
 ```
 
 Starts postgres, redis, the backend, the worker, and the frontend together
