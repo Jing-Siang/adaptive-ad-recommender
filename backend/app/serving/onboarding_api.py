@@ -36,6 +36,28 @@ time, conversational tone, not a formal survey. The user's messages sometimes de
 ads you showed them (e.g. "I liked X, wasn't interested in Y") -- treat that as real signal about their \
 taste and let it inform your next question, don't just ignore it."""
 
+# Deterministic last resort if the model still asks a question after every
+# retry below -- guarantees the final turn is never a follow-up question,
+# even if every attempt fails.
+_FINISH_FALLBACK_REPLY = "Great chatting with you! Your personalized feed is ready -- go check it out!"
+
+
+def _generate_finish_reply(instructions: str, input_messages: list[dict]) -> str:
+    """Non-streamed, validated generation for the final onboarding turn.
+    Tested live: even with a front-loaded, explicit "do not ask a question"
+    instruction, gpt-4o-mini still asked one anyway roughly half the time --
+    a real reliability gap, not a prompt-wording problem, so prompting alone
+    isn't enough here. Retries (plain, no backoff needed -- this isn't a rate
+    limit/error case, just resampling) until a reply with no "?" comes back,
+    falling back to a fixed closing line if it never does."""
+    for _ in range(3):
+        response = _get_client().responses.create(
+            model=settings.openai_chat_model, instructions=instructions, input=input_messages
+        )
+        if "?" not in response.output_text:
+            return response.output_text
+    return _FINISH_FALLBACK_REPLY
+
 
 @router.post("/chat")
 def onboarding_chat(request: OnboardingChatRequest) -> StreamingResponse:
@@ -44,28 +66,40 @@ def onboarding_chat(request: OnboardingChatRequest) -> StreamingResponse:
     Deliberately not wrapped in @retry: a mid-stream failure can't be
     usefully retried the way a single blocking call can (the client would
     need to handle a partial response either way)."""
+    # No branch for "candidates are about to be shown" -- getting the model
+    # to reliably narrate specific candidate content in its freeform reply
+    # turned out to be a dead end (tested live: a front-loaded "must name
+    # each of N" instruction worked in a short/fresh conversation but
+    # completely failed once there was a longer, topically-focused
+    # conversation history for the model's attention to latch onto instead).
+    # The reply doesn't need to change based on whether candidates are shown
+    # -- see OnboardingChatRequest's docstring for where that signal lives
+    # instead. ready_to_finish is the only turn that needs different
+    # instructions, since it needs to stop asking questions and close out.
     instructions = _CHAT_SYSTEM_PROMPT
     if request.ready_to_finish:
-        instructions += (
-            "\n\nThe user is ready to move on -- do not ask another question, and do not mention showing "
-            "more candidates. Give a short, warm closing reply letting them know their personalized feed "
-            "is ready, and invite them to go check it out."
-        )
-    elif request.candidates:
-        candidate_lines = "\n".join(
-            f'- "{c.headline}": {c.description} (category: {c.category})' for c in request.candidates
-        )
-        instructions += (
-            f"\n\nYou are showing the user these candidate ads right after this reply:\n{candidate_lines}\n"
-            "Naturally acknowledge what they're about in your reply (briefly, in your own words -- don't "
-            "just list them back verbatim)."
-        )
+        instructions = (
+            "IMPORTANT -- this is the final onboarding turn. The user is done answering questions; "
+            "onboarding is complete. Your reply this turn must NOT ask any question of any kind (no "
+            '"what about...", no "do you prefer...", nothing). Instead, write a short (1-2 sentence), warm '
+            "closing message that acknowledges their taste and clearly tells them their personalized feed "
+            "is ready, inviting them to go check it out now. This completely overrides the \"ask "
+            "exploratory questions\" behavior described below -- that only applies to earlier turns, not "
+            "this one.\n\n"
+        ) + instructions
+
+    input_messages = [m.model_dump() for m in request.messages]
 
     def _stream():
+        if request.ready_to_finish:
+            # Non-streamed + validated instead of the real token stream below --
+            # see _generate_finish_reply for why this one turn needs that.
+            yield _generate_finish_reply(instructions, input_messages)
+            return
         stream = _get_client().responses.create(
             model=settings.openai_chat_model,
             instructions=instructions,
-            input=[m.model_dump() for m in request.messages],
+            input=input_messages,
             stream=True,
         )
         for event in stream:

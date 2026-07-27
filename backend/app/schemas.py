@@ -199,15 +199,21 @@ class OnboardingChatRequest(BaseModel):
     """Request body for POST /onboarding/chat -- the streamed, user-visible
     conversational turn. No user_id needed: this call touches no DB/Pinecone
     state, it's pure conversation over whatever history the client sends.
-    candidates/ready_to_finish are this turn's checkpoint result (call
-    /onboarding/checkpoint first): candidates (if any) are fed back to the
-    model in full so it can naturally reference what they actually are,
-    rather than just knowing a candidates-were-shown boolean. ready_to_finish
-    tells the model to wrap up and guide the user to their feed instead of
-    asking another question."""
+
+    No candidates field: earlier this fed candidate content to the model so
+    it could narrate what's being shown, but that turned out unreliable in
+    real multi-turn conversations (tested live -- a topically-focused
+    conversation reliably pulled the model's attention away from the actual
+    ad content instead). The reply doesn't need to change based on whether
+    candidates are shown -- the "this connects to what you said" signal now
+    lives in a deterministic label the frontend renders above the cards,
+    with no model involvement, so the chat call never needs to know.
+
+    ready_to_finish is this turn's checkpoint result (call
+    /onboarding/checkpoint first) -- tells the model to wrap up and guide
+    the user to their feed instead of asking another question."""
 
     messages: list[ChatMessage]
-    candidates: list[AdCandidate] = []
     ready_to_finish: bool = False
 
 

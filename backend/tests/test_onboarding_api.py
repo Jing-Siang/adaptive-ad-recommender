@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
+import app.serving.onboarding_api as onboarding_api
 from app.main import app
 from app.schemas import AdCandidate, CheckpointJudgment
 
@@ -83,7 +84,7 @@ def test_checkpoint_seeds_profile_on_first_show_candidates(
 @patch("app.serving.onboarding_api.fetch_vector", return_value=[0.4, 0.5, 0.6])
 @patch(
     "app.serving.onboarding_api._judge_checkpoint",
-    return_value=CheckpointJudgment(show_candidates=True, ready_to_finish=True, interest_summary="plumbing focus"),
+    return_value=CheckpointJudgment(show_candidates=True, ready_to_finish=False, interest_summary="plumbing focus"),
 )
 def test_checkpoint_skips_reseeding_when_profile_already_exists(
     mock_judge, mock_fetch_vector, mock_embed_query, mock_upsert_vector, mock_retrieve
@@ -96,10 +97,40 @@ def test_checkpoint_skips_reseeding_when_profile_already_exists(
     )
 
     assert resp.status_code == 200
-    assert resp.json()["ready_to_finish"] is True
+    assert resp.json()["ready_to_finish"] is False
     mock_embed_query.assert_not_called()
     mock_upsert_vector.assert_not_called()
     mock_retrieve.assert_called_once()
+
+
+@patch("app.serving.onboarding_api.retrieve_candidates", return_value=[_CANDIDATE])
+@patch("app.serving.onboarding_api.upsert_vector")
+@patch("app.serving.onboarding_api.embed_query")
+@patch("app.serving.onboarding_api.fetch_vector", return_value=[0.4, 0.5, 0.6])
+@patch(
+    "app.serving.onboarding_api._judge_checkpoint",
+    return_value=CheckpointJudgment(show_candidates=True, ready_to_finish=True, interest_summary="plumbing focus"),
+)
+def test_checkpoint_skips_candidates_when_ready_to_finish(
+    mock_judge, mock_fetch_vector, mock_embed_query, mock_upsert_vector, mock_retrieve
+):
+    """Even if the judge call returns show_candidates=True alongside
+    ready_to_finish=True, no fresh candidate batch is retrieved -- there's no
+    point previewing one right before handing the user off to their full
+    feed. This is a code-level guard, not just prompt wording, since the
+    judge call can't be trusted to always keep these mutually exclusive."""
+    resp = client.post(
+        "/onboarding/checkpoint",
+        json={"user_id": "pytest-user", "messages": [{"role": "user", "content": "just the sink really"}]},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ready_to_finish"] is True
+    assert data["candidates"] == []
+    mock_embed_query.assert_not_called()
+    mock_upsert_vector.assert_not_called()
+    mock_retrieve.assert_not_called()
 
 
 @patch("app.serving.onboarding_api._get_client")
@@ -116,26 +147,13 @@ def test_onboarding_chat_streams_text_deltas(mock_get_client):
 
 
 @patch("app.serving.onboarding_api._get_client")
-def test_onboarding_chat_notes_show_candidates_in_instructions(mock_get_client):
-    """When show_candidates=true, the model is told candidates are about to
-    be shown -- so it can naturally acknowledge them without needing their
-    specific details."""
-    mock_client = MagicMock()
-    mock_client.responses.create.return_value = _fake_stream(["ok"])
-    mock_get_client.return_value = mock_client
-
-    client.post(
-        "/onboarding/chat",
-        json={"messages": [{"role": "user", "content": "need a plumber"}], "show_candidates": True},
-    )
-
-    _, kwargs = mock_client.responses.create.call_args
-    assert "showing the user a few candidate ads" in kwargs["instructions"]
-
-
-@patch("app.serving.onboarding_api._get_client")
-def test_onboarding_chat_omits_candidate_note_by_default(mock_get_client):
-    """show_candidates defaults to False -- most turns are just conversation."""
+def test_onboarding_chat_uses_base_prompt_unchanged_for_a_normal_turn(mock_get_client):
+    """A normal turn (not ready_to_finish) gets the base system prompt as-is
+    -- whether candidates are being shown this turn doesn't change the
+    model's instructions at all (see OnboardingChatRequest's docstring:
+    feeding candidate content here for the model to narrate was tried and
+    found unreliable in real multi-turn conversations; the "this connects to
+    what you said" signal now lives in a deterministic UI label instead)."""
     mock_client = MagicMock()
     mock_client.responses.create.return_value = _fake_stream(["ok"])
     mock_get_client.return_value = mock_client
@@ -143,4 +161,47 @@ def test_onboarding_chat_omits_candidate_note_by_default(mock_get_client):
     client.post("/onboarding/chat", json={"messages": [{"role": "user", "content": "hi"}]})
 
     _, kwargs = mock_client.responses.create.call_args
-    assert "showing the user a few candidate ads" not in kwargs["instructions"]
+    assert kwargs["instructions"] == onboarding_api._CHAT_SYSTEM_PROMPT
+
+
+@patch("app.serving.onboarding_api._get_client")
+def test_onboarding_chat_ready_to_finish_uses_non_streamed_validated_reply(mock_get_client):
+    """ready_to_finish skips the real token stream and uses the validated
+    retry-until-compliant path instead (see _generate_finish_reply) -- a
+    plain "?"-free reply on the first attempt should be returned as-is."""
+    mock_client = MagicMock()
+    mock_client.responses.create.return_value = SimpleNamespace(output_text="Your feed is ready, go check it out!")
+    mock_get_client.return_value = mock_client
+
+    resp = client.post(
+        "/onboarding/chat",
+        json={"messages": [{"role": "user", "content": "yes I liked those"}], "ready_to_finish": True},
+    )
+
+    assert resp.status_code == 200
+    assert resp.text == "Your feed is ready, go check it out!"
+    mock_client.responses.create.assert_called_once()
+    assert mock_client.responses.create.call_args.kwargs.get("stream") is not True
+
+
+@patch("app.serving.onboarding_api._get_client")
+def test_onboarding_chat_ready_to_finish_retries_then_falls_back(mock_get_client):
+    """If every retry still comes back with a question, fall back to the
+    fixed closing line rather than surfacing a stray question on the turn
+    that's supposed to wrap onboarding up."""
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [
+        SimpleNamespace(output_text="How about eco-friendly gear?"),
+        SimpleNamespace(output_text="What do you think of hiking tours?"),
+        SimpleNamespace(output_text="Do you like camping too?"),
+    ]
+    mock_get_client.return_value = mock_client
+
+    resp = client.post(
+        "/onboarding/chat",
+        json={"messages": [{"role": "user", "content": "yes I liked those"}], "ready_to_finish": True},
+    )
+
+    assert resp.status_code == 200
+    assert resp.text == "Great chatting with you! Your personalized feed is ready -- go check it out!"
+    assert mock_client.responses.create.call_count == 3

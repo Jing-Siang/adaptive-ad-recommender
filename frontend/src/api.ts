@@ -1,5 +1,4 @@
 import type {
-  AdCandidate,
   BatchRecommendationResponse,
   CampaignCreateRequest,
   CampaignResponse,
@@ -96,13 +95,13 @@ export function onboardingCheckpoint(userId: string, messages: ChatMessage[]): P
 
 /**
  * Streams the onboarding chat reply, calling onDelta with each text chunk as
- * it arrives. candidates (if any) are fed back in full so the model can
- * reference what they actually are; readyToFinish tells it to wrap up and
- * guide the user to their feed instead of asking another question.
+ * it arrives. readyToFinish tells the model to wrap up and guide the user to
+ * their feed instead of asking another question. No candidates param -- the
+ * reply doesn't change based on whether candidates are shown this turn (see
+ * OnboardingChatRequest's docstring on the backend for why).
  */
 export async function streamOnboardingChat(
   messages: ChatMessage[],
-  candidates: AdCandidate[],
   readyToFinish: boolean,
   onDelta: (chunk: string) => void,
   signal?: AbortSignal,
@@ -110,7 +109,7 @@ export async function streamOnboardingChat(
   const response = await fetch(`${API_BASE_URL}/onboarding/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, candidates, ready_to_finish: readyToFinish }),
+    body: JSON.stringify({ messages, ready_to_finish: readyToFinish }),
     signal,
   })
   if (!response.ok || !response.body) {

@@ -84,7 +84,7 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
   async function handleSubmit() {
     const reactionNote = describeReactions(lastCandidates, reactions)
     const text = input.trim()
-    if (!reactionNote && !text) return
+    if (!text) return
 
     // The reaction note is sent to the model (so it has real signal to react
     // to) but never shown in the chat itself -- the user already saw/reacted
@@ -115,7 +115,6 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
       let fullReply = ''
       await streamOnboardingChat(
         newMessages,
-        checkpoint.show_candidates ? checkpoint.candidates : [],
         checkpoint.ready_to_finish,
         (chunk) => {
           fullReply += chunk
@@ -149,12 +148,12 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!busy) handleSubmit()
+      if (!busy && input.trim().length > 0) handleSubmit()
     }
   }
 
   const canFinish = readyToFinish || checkpointRounds >= MAX_CHECKPOINT_ROUNDS
-  const canSubmit = !busy && (input.trim().length > 0 || describeReactions(lastCandidates, reactions) !== null)
+  const canSubmit = !busy && input.trim().length > 0
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pt-6">
@@ -177,19 +176,31 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
               <div className="max-w-full leading-relaxed text-stone-800 dark:text-stone-200">{turn.content}</div>
             )}
             {turn.candidates && turn.candidates.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {turn.candidates.map((c) => (
-                  <div key={c.ad_id} className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
-                    <p className="font-medium">{c.headline}</p>
-                    <p className="mt-0.5 text-sm text-stone-600 dark:text-stone-400">{c.description}</p>
-                    <div className="mt-2.5">
-                      <ReactionButtons
-                        selected={reactions[c.ad_id] ?? null}
-                        onReact={(r) => handleReact(c.ad_id, r)}
-                      />
+              // A visually distinct, muted "aside" box -- separate from the
+              // conversation itself, so it reads as an optional suggestion
+              // to glance at, not a second thing the user has to answer
+              // alongside the actual question above.
+              <div className="mt-3 rounded-xl bg-stone-100/70 p-3 dark:bg-stone-800/50">
+                <p className="text-xs font-medium text-stone-500 dark:text-stone-400">
+                  A few things you might like
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {turn.candidates.map((c) => (
+                    <div key={c.ad_id} className="rounded-lg bg-white p-2.5 dark:bg-stone-900">
+                      <p className="text-sm font-medium">{c.headline}</p>
+                      <p className="mt-0.5 text-xs text-stone-600 dark:text-stone-400">{c.description}</p>
+                      <div className="mt-2">
+                        <ReactionButtons
+                          selected={reactions[c.ad_id] ?? null}
+                          onReact={(r) => handleReact(c.ad_id, r)}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-stone-500 dark:text-stone-500">
+                  React to what catches your eye, then tell me what you think.
+                </p>
               </div>
             )}
           </div>
