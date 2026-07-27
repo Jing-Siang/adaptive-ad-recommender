@@ -103,7 +103,11 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
     setDisplayTurns(newTurns)
     setInput('')
     setLastCandidates([])
-    setReactions({})
+    // Not clearing reactions here -- it's keyed by ad_id, and each round's
+    // candidates get fresh ad_ids, so old entries never collide with a new
+    // round's cards. Clearing it wiped the "selected" highlight off cards
+    // from earlier turns the moment you submitted, even though the reaction
+    // itself was already recorded.
     setBusy(true)
     setError(null)
     setStreamingText('')
@@ -185,18 +189,26 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
                   A few things you might like
                 </p>
                 <div className="mt-2 space-y-1.5">
-                  {turn.candidates.map((c) => (
-                    <div key={c.ad_id} className="rounded-lg bg-white p-2.5 dark:bg-stone-900">
-                      <p className="text-sm font-medium">{c.headline}</p>
-                      <p className="mt-0.5 text-xs text-stone-600 dark:text-stone-400">{c.description}</p>
-                      <div className="mt-2">
-                        <ReactionButtons
-                          selected={reactions[c.ad_id] ?? null}
-                          onReact={(r) => handleReact(c.ad_id, r)}
-                        />
+                  {turn.candidates.map((c) => {
+                    // Reference-equal to lastCandidates only for the round
+                    // that hasn't been submitted yet -- once you move on,
+                    // lastCandidates is reset/reassigned, so older rounds'
+                    // reactions are locked in and can't be changed anymore.
+                    const isActiveRound = turn.candidates === lastCandidates
+                    return (
+                      <div key={c.ad_id} className="rounded-lg bg-white p-2.5 dark:bg-stone-900">
+                        <p className="text-sm font-medium">{c.headline}</p>
+                        <p className="mt-0.5 text-xs text-stone-600 dark:text-stone-400">{c.description}</p>
+                        <div className="mt-2">
+                          <ReactionButtons
+                            selected={reactions[c.ad_id] ?? null}
+                            onReact={(r) => handleReact(c.ad_id, r)}
+                            disabled={!isActiveRound}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 <p className="mt-2 text-xs text-stone-500 dark:text-stone-500">
                   React to what catches your eye, then tell me what you think.
