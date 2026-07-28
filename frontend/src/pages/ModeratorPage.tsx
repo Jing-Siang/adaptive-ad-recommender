@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { listCampaigns, moderateCampaign } from '../api'
 import type { CampaignResponse } from '../types'
+import { Spinner } from '../components/Spinner'
 
 export function ModeratorPage() {
   const [campaigns, setCampaigns] = useState<CampaignResponse[]>([])
@@ -43,6 +44,14 @@ export function ModeratorPage() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="flex min-h-[80vh] items-center justify-center">
+        <Spinner />
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div>
@@ -64,9 +73,7 @@ export function ModeratorPage() {
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {loading ? (
-        <p className="text-sm text-stone-600 dark:text-stone-400">Loading…</p>
-      ) : campaigns.length === 0 ? (
+      {campaigns.length === 0 ? (
         <p className="text-sm text-stone-600 dark:text-stone-400">Queue is empty — nothing needs review.</p>
       ) : (
         <ul className="space-y-4">

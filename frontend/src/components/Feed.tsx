@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchRecommendationBatch } from '../api'
 import type { FeedItem } from '../types'
 import { FeedCard } from './FeedCard'
+import { Spinner } from './Spinner'
 
 // The backend caps batch_size at 50 -- using the max amortizes the one
 // LLM re-rank call per batch across as many items as possible, minimizing
@@ -62,6 +63,18 @@ export function Feed({ userId }: { userId: string }) {
     setItems((prev) => prev.filter((i) => i.ad_id !== adId))
   }
 
+  if (loading && items.length === 0) {
+    // flex-1, not a vh guess -- fills whatever space this actually has in
+    // its parent's flex column (which already excludes the sticky restart
+    // bar above it, since that's a sibling row, not part of this box), so
+    // it centers correctly no matter that header's real height.
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <Spinner />
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-6">
       {items.map((item) => (
@@ -69,7 +82,11 @@ export function Feed({ userId }: { userId: string }) {
       ))}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {!exhausted && <div ref={sentinelRef} className="h-4" />}
-      {loading && <p className="text-center text-sm text-stone-500 dark:text-stone-500">Loading more…</p>}
+      {loading && items.length > 0 && (
+        <div className="flex justify-center py-4">
+          <Spinner />
+        </div>
+      )}
       {exhausted && items.length === 0 && (
         <p className="text-center text-sm text-stone-500 dark:text-stone-500">Nothing to show right now.</p>
       )}

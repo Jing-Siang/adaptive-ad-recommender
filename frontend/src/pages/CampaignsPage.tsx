@@ -4,6 +4,7 @@ import { listCampaigns } from '../api'
 import type { CampaignResponse } from '../types'
 import { StatusBadge } from '../components/StatusBadge'
 import { CampaignFormModal } from '../components/CampaignFormModal'
+import { Spinner } from '../components/Spinner'
 
 export function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignResponse[]>([])
@@ -35,6 +36,14 @@ export function CampaignsPage() {
     return () => clearInterval(id)
   }, [campaigns])
 
+  if (loading) {
+    return (
+      <div className="flex min-h-[80vh] items-center justify-center">
+        <Spinner />
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-6">
       <div className="flex items-center justify-between">
@@ -54,9 +63,7 @@ export function CampaignsPage() {
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {loading ? (
-        <p className="text-sm text-stone-600 dark:text-stone-400">Loading…</p>
-      ) : campaigns.length === 0 ? (
+      {campaigns.length === 0 ? (
         <p className="text-sm text-stone-600 dark:text-stone-400">No campaigns yet.</p>
       ) : (
         <div className="overflow-x-auto">

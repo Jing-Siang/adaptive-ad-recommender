@@ -16,6 +16,30 @@ body {
   min-height: 100svh;
 }
 
+/* Bigger jump than Tailwind's default animate-bounce (~25% of the
+   element's own size, quite subtle for a small dot) -- used by Spinner. */
+@keyframes bounce-jump {
+  0%,
+  100% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+  }
+  50% {
+    transform: translateY(-10px);
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+.animate-bounce-jump {
+  /* Longhand, not the animation shorthand -- shorthand resets every
+     sub-property it doesn't mention, including animation-delay, which
+     would silently cancel the staggered [animation-delay:...] utility
+     class each dot uses to jump in sequence rather than together. */
+  animation-name: bounce-jump;
+  animation-duration: 0.7s;
+  animation-iteration-count: infinite;
+}
+
 .thin-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgb(214 211 209) transparent; /* stone-300 */

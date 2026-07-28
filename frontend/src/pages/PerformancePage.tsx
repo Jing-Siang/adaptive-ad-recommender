@@ -4,6 +4,7 @@ import type { PerformanceResponse } from '../types'
 import { StatTile } from '../components/StatTile'
 import { CtrTrendChart } from '../components/CtrTrendChart'
 import { StatusBadge } from '../components/StatusBadge'
+import { Spinner } from '../components/Spinner'
 
 function formatCompact(n: number): string {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(n)
@@ -37,8 +38,8 @@ export function PerformancePage() {
 
   if (!data) {
     return (
-      <div className="mx-auto max-w-6xl p-6">
-        <p className="text-sm text-stone-600 dark:text-stone-400">Loading…</p>
+      <div className="flex min-h-[80vh] items-center justify-center">
+        <Spinner />
       </div>
     )
   }
