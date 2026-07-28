@@ -38,7 +38,7 @@ export function CampaignsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[80vh] items-center justify-center">
+      <div className="fixed inset-y-0 left-56 right-0 flex items-center justify-center">
         <Spinner />
       </div>
     )

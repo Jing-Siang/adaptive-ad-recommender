@@ -49,27 +49,39 @@ export function Feed({ userId }: { userId: string }) {
   useEffect(() => {
     const el = sentinelRef.current
     if (!el) return
+    // rootMargin only expands the root's own bounds -- root defaults to the
+    // top-level viewport, but the actual scrolling happens inside SimpleBar's
+    // nested overflow:auto container, which clips the sentinel at its own
+    // (unexpanded) edge before the margin ever applies. Pointing root at
+    // that real scrolling ancestor is what makes rootMargin do anything here.
+    const root = el.closest<HTMLElement>('.simplebar-content-wrapper')
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) loadMore()
       },
-      { rootMargin: '400px' },
+      { root, rootMargin: '800px' },
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [loadMore])
+    // loading/items.length aren't read in here, but the sentinel div only
+    // exists in the DOM once the initial-load early return below stops
+    // firing -- loadMore's own reference doesn't change at that point, so
+    // without these the observer would never actually get attached (it'd
+    // bail out via `if (!el) return` on the one render where it runs).
+  }, [loadMore, loading, items.length])
 
   function hideItem(adId: string) {
     setItems((prev) => prev.filter((i) => i.ad_id !== adId))
   }
 
   if (loading && items.length === 0) {
-    // flex-1, not a vh guess -- fills whatever space this actually has in
-    // its parent's flex column (which already excludes the sticky restart
-    // bar above it, since that's a sibling row, not part of this box), so
-    // it centers correctly no matter that header's real height.
+    // Fixed, spanning the full viewport height -- centering within flex-1
+    // (the space left after the sticky restart bar above it) put this
+    // slightly below true screen-center. left-56 matches the sidebar's
+    // width (App.tsx), so it stays within the main content area instead of
+    // centering across the whole window including the sidebar.
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="fixed inset-y-0 left-56 right-0 flex items-center justify-center">
         <Spinner />
       </div>
     )
@@ -81,7 +93,7 @@ export function Feed({ userId }: { userId: string }) {
         <FeedCard key={item.ad_id} item={item} userId={userId} onHidden={hideItem} />
       ))}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      {!exhausted && <div ref={sentinelRef} className="h-4" />}
+      {!exhausted && <div ref={sentinelRef} className="h-0" />}
       {loading && items.length > 0 && (
         <div className="flex justify-center py-4">
           <Spinner />
