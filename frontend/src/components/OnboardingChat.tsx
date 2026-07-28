@@ -115,11 +115,23 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
     try {
       const checkpoint = await onboardingCheckpoint(userId, newMessages)
 
+      // MAX_CHECKPOINT_ROUNDS is a client-only safety net -- the backend
+      // has no concept of it, so checkpoint.ready_to_finish alone can't
+      // reflect it. Deciding this before the chat call (rather than after,
+      // via checkpointRounds state) keeps what's sent to /onboarding/chat
+      // and what the UI shows in sync -- otherwise the round that crosses
+      // the cap still went out as a normal turn (fresh question +
+      // candidates, no idea it should've wrapped up), and the finish
+      // button only appeared on the render after, sitting right below that
+      // freshly-generated block.
+      const roundsAfterThis = checkpoint.show_candidates ? checkpointRounds + 1 : checkpointRounds
+      const readyToFinish = checkpoint.ready_to_finish || roundsAfterThis >= MAX_CHECKPOINT_ROUNDS
+
       abortRef.current = new AbortController()
       let fullReply = ''
       await streamOnboardingChat(
         newMessages,
-        checkpoint.ready_to_finish,
+        readyToFinish,
         (chunk) => {
           fullReply += chunk
           setStreamingText(fullReply)
@@ -127,21 +139,23 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
         abortRef.current.signal,
       )
 
+      const showCandidatesThisTurn = checkpoint.show_candidates && !readyToFinish
+
       setApiMessages((msgs) => [...msgs, { role: 'assistant', content: fullReply }])
       setDisplayTurns((turns) => [
         ...turns,
-        { role: 'assistant', content: fullReply, candidates: checkpoint.show_candidates ? checkpoint.candidates : undefined },
+        { role: 'assistant', content: fullReply, candidates: showCandidatesThisTurn ? checkpoint.candidates : undefined },
       ])
       setStreamingText(null)
 
-      if (checkpoint.show_candidates) {
+      if (showCandidatesThisTurn) {
         setLastCandidates(checkpoint.candidates)
         setCheckpointRounds((n) => n + 1)
         checkpoint.candidates.forEach((c) => {
           logImpression(userId, c.ad_id).catch(() => {})
         })
       }
-      setReadyToFinish(checkpoint.ready_to_finish)
+      setReadyToFinish(readyToFinish)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
