@@ -8,6 +8,7 @@ import {
 } from '../api'
 import type { AdCandidate, ChatMessage, Reaction } from '../types'
 import { ReactionButtons } from './ReactionButtons'
+import { Spinner } from './Spinner'
 
 const OPENING_MESSAGE = "Hi! What are you into these days?"
 const MAX_CHECKPOINT_ROUNDS = 3
@@ -242,7 +243,9 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
           </div>
         ))}
         {streamingText !== null && (
-          <div className="max-w-full leading-relaxed text-stone-800 dark:text-stone-200">{streamingText || '…'}</div>
+          <div className="max-w-full leading-relaxed text-stone-800 dark:text-stone-200">
+            {streamingText || <Spinner label="" />}
+          </div>
         )}
         <div ref={bottomRef} />
       </div>
