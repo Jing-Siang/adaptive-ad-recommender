@@ -62,7 +62,9 @@ def _recently_shown_campaign_ids(db: Session, user_id: str) -> set[int]:
     return {row.campaign_id for row in rows}
 
 
-def retrieve_candidates(db: Session, user_id: str, top_k: int = 10) -> list[AdCandidate]:
+def retrieve_candidates(
+    db: Session, user_id: str, top_k: int = 10, vector: list[float] | None = None
+) -> list[AdCandidate]:
     """Cheap first-pass retrieval: use the user's stored profile vector, query
     the `ads` namespace for the nearest ads by cosine similarity (excluding
     blocklisted and recently-shown campaigns at query time), then keep only
@@ -71,10 +73,17 @@ def retrieve_candidates(db: Session, user_id: str, top_k: int = 10) -> list[AdCa
     Requires a profile to already exist -- onboarding (POST /users, then the
     checkpoint flow) always creates one before a user ever reaches /recommend,
     so a missing profile here means recommend was called before onboarding
-    finished, not a legitimate cold-start case to paper over."""
-    vector = fetch_vector(user_id, namespace="users")
+    finished, not a legitimate cold-start case to paper over.
+
+    vector is optional: pass it directly if the caller already has it (e.g.
+    the onboarding checkpoint, right after seeding a brand-new profile) to
+    skip re-fetching from Pinecone -- upserts aren't always immediately
+    readable, so re-fetching a vector moments after writing it can spuriously
+    raise the "no profile found" error below even though the write succeeded."""
     if vector is None:
-        raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
+        vector = fetch_vector(user_id, namespace="users")
+        if vector is None:
+            raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
 
     blocklist = {int(x) for x in (fetch_metadata(user_id, namespace="users") or {}).get("blocklist", [])}
     excluded_ids = blocklist | _recently_shown_campaign_ids(db, user_id)

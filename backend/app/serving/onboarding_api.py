@@ -152,7 +152,8 @@ def onboarding_checkpoint(
     # fresh candidate batch on the same turn onboarding is wrapping up, even
     # if the judge call still returns both flags true.
     if judgment.show_candidates and not judgment.ready_to_finish:
-        if fetch_vector(request.user_id, namespace="users") is None:
+        vector = fetch_vector(request.user_id, namespace="users")
+        if vector is None:
             vector = embed_query([judgment.interest_summary])[0]
             upsert_vector(
                 request.user_id,
@@ -160,7 +161,10 @@ def onboarding_checkpoint(
                 metadata={"interest_summary": judgment.interest_summary},
                 namespace="users",
             )
-        candidates = retrieve_candidates(db, request.user_id, top_k=_CHECKPOINT_CANDIDATE_COUNT)
+        # Pass the vector directly (not just the user_id) -- avoids
+        # retrieve_candidates re-fetching from Pinecone right after we may
+        # have just upserted it, which isn't always immediately readable.
+        candidates = retrieve_candidates(db, request.user_id, top_k=_CHECKPOINT_CANDIDATE_COUNT, vector=vector)
 
     return OnboardingCheckpointResponse(
         show_candidates=judgment.show_candidates,
