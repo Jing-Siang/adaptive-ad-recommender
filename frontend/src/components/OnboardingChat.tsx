@@ -47,13 +47,23 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Directly scrolling the real scroll container (SimpleBar's internal
+    // .simplebar-content-wrapper, from App.tsx) to its true maximum instead
+    // of using scrollIntoView -- block/scroll-margin alignment math on a
+    // zero-height marker next to a sticky sibling turned out unreliable in
+    // practice. Setting scrollTop past the max is safe; browsers clamp it.
+    const scrollContainer = bottomRef.current?.closest<HTMLElement>('.simplebar-content-wrapper')
+    scrollContainer?.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' })
   }, [displayTurns, streamingText])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
   useEffect(() => {
-    if (!busy) textareaRef.current?.focus()
+    // preventScroll -- without it, the browser's native "scroll to reveal
+    // the focused element" kicks in and silently overrides the intentional
+    // scroll-to-bottom effect above (both fire in the same render when a
+    // round completes; this one runs right after and wins).
+    if (!busy) textareaRef.current?.focus({ preventScroll: true })
   }, [busy])
 
   useEffect(() => {
