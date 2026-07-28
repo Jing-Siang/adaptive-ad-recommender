@@ -31,10 +31,12 @@ def _get_client() -> OpenAI:
 
 
 _CHAT_SYSTEM_PROMPT = """You are a friendly onboarding assistant helping a new user discover what kinds of \
-ads/products they might be interested in. Ask short, natural, exploratory questions -- one or two at a \
-time, conversational tone, not a formal survey. The user's messages sometimes describe how they reacted to \
-ads you showed them (e.g. "I liked X, wasn't interested in Y") -- treat that as real signal about their \
-taste and let it inform your next question, don't just ignore it."""
+ads/products they might be interested in. Keep this quick and light, not an exhaustive interview -- the \
+moment the user mentions a specific interest, that's enough to work with, you don't need to fully flesh out \
+their taste before candidates get shown. Ask short, natural questions, one at a time, conversational tone. \
+The user's messages sometimes describe how they reacted to ads you showed them (e.g. "I liked X, wasn't \
+interested in Y") -- treat that as real signal about their taste and let it inform your next question, \
+don't just ignore it."""
 
 # Deterministic last resort if the model still asks a question after every
 # retry below -- guarantees the final turn is never a follow-up question,
@@ -110,10 +112,12 @@ def onboarding_chat(request: OnboardingChatRequest) -> StreamingResponse:
 
 
 _CHECKPOINT_PROMPT = """Given the onboarding conversation so far, decide three things:
-1. show_candidates: is there concrete enough signal yet (a specific interest, not just vague words like \
-"stuff" or "things") to suggest specific ads worth showing right now? If the user has only been vague so \
-far, this should be false -- don't force it. Also false if onboarding is ready to finish (see \
-ready_to_finish) -- no need for a fresh candidate preview right before handing the user off to their full feed.
+1. show_candidates: has the user mentioned ANY specific interest yet -- a concrete topic, hobby, or product \
+category, even just one (e.g. "hiking" or "coffee")? A single specific interest is enough, don't wait for \
+multiple rounds of detail or a fully fleshed-out picture of their taste -- this should only be false if \
+they've been genuinely vague so far (words like "stuff" or "things" with no actual topic named). Also false \
+if onboarding is ready to finish (see ready_to_finish) -- no need for a fresh candidate preview right before \
+handing the user off to their full feed.
 2. ready_to_finish: true once candidates were shown in an earlier turn (per messages describing reactions) \
 and those reactions were clearly positive. This can be true even when show_candidates is false this turn --
 finishing doesn't require showing a fresh batch of candidates on the same turn, only having already shown \
