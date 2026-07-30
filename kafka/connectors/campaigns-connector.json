@@ -1,0 +1,23 @@
+{
+  "name": "ad-recommender-campaigns",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "plugin.name": "pgoutput",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "ad_recommender",
+    "database.password": "ad_recommender",
+    "database.dbname": "ad_recommender",
+    "topic.prefix": "ad_recommender",
+    "slot.name": "ad_recommender_campaigns_slot",
+    "publication.name": "ad_recommender_campaigns_pub",
+    "publication.autocreate.mode": "filtered",
+    "table.include.list": "public.campaigns",
+    "snapshot.mode": "initial",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}

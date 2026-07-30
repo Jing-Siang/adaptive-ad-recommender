@@ -1,5 +1,6 @@
 .PHONY: help install install-backend install-frontend infra infra-down migrate \
-	backend worker frontend seed test docker-up docker-down
+	backend worker frontend seed test docker-up docker-down \
+	kafka kafka-down kafka-register-connector
 
 help:
 	@echo "adaptive-ad-recommender -- common dev commands"
@@ -16,7 +17,12 @@ help:
 	@echo "  make docker-up      Run everything (postgres, redis, backend, worker, frontend) via Docker Compose"
 	@echo "  make docker-down    Stop the Docker Compose stack"
 	@echo ""
+	@echo "  make kafka                     Start Kafka + Debezium Connect (opt-in, see docs/kafka_cdc_plan.md)"
+	@echo "  make kafka-down                 Stop Kafka + Connect"
+	@echo "  make kafka-register-connector   Create the compacted topic + register the Debezium connector (safe to re-run)"
+	@echo ""
 	@echo "Typical flow: make infra, then make backend / make worker / make frontend in three terminals."
+	@echo "For Kafka/CDC work, also run: make kafka && make kafka-register-connector"
 
 install: install-backend install-frontend
 
@@ -55,3 +61,26 @@ docker-up:
 
 docker-down:
 	docker compose down
+
+kafka:
+	docker compose up -d kafka connect
+
+kafka-down:
+	docker compose stop kafka connect
+
+kafka-register-connector:
+	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+		--bootstrap-server kafka:9092 \
+		--create --if-not-exists \
+		--topic ad_recommender.public.campaigns \
+		--partitions 1 --replication-factor 1 \
+		--config cleanup.policy=compact
+	@code=$$(curl -s -o /tmp/connector-response.json -w "%{http_code}" \
+		-X POST -H "Content-Type: application/json" \
+		--data @kafka/connectors/campaigns-connector.json \
+		http://localhost:8083/connectors); \
+	if [ "$$code" = "201" ] || [ "$$code" = "409" ]; then \
+		echo "OK ($$code)"; \
+	else \
+		echo "FAILED ($$code):"; cat /tmp/connector-response.json; exit 1; \
+	fi

@@ -1,9 +1,10 @@
 # Kafka + Debezium CDC plan: Postgres campaign eligibility -> Pinecone
 
-Not started yet -- this is the working TODO list for wiring up real CDC
-(Change Data Capture) so `campaigns` table eligibility (status/budget)
-propagates into Pinecone automatically instead of relying purely on
-`retrieval.py`'s post-filter + oversample-and-retry.
+Phase 0 + Phase 1 are done and live-verified (see "Status" at the bottom).
+This is the working TODO list for wiring up real CDC (Change Data Capture)
+so `campaigns` table eligibility (status/budget) propagates into Pinecone
+automatically instead of relying purely on `retrieval.py`'s post-filter +
+oversample-and-retry.
 
 **Why Kafka here and not just Redis/RQ**: campaign *review* jobs (RQ) are
 independent of each other -- reviewing campaign #47 has no relationship to
@@ -29,37 +30,72 @@ safety net for whatever small propagation lag remains.
 
 ## Phase 0 -- design decisions (lock in before building)
 
-- [ ] Consume all `campaigns` table changes on one topic; filter in the
+- [x] Consume all `campaigns` table changes on one topic; filter in the
       consumer to the fields that actually affect eligibility (`status`,
       `budget_spent`, `budget_total`), not a topic per field.
-- [ ] Use `pgoutput` as the Debezium plugin (built into Postgres 10+ natively
+- [x] Use `pgoutput` as the Debezium plugin (built into Postgres 10+ natively
       -- avoids installing `wal2json`/`decoderbufs` extensions).
-- [ ] JSON (not Avro) for the Kafka message format -- avoids standing up a
+- [x] JSON (not Avro) for the Kafka message format -- avoids standing up a
       Schema Registry at this project's scale.
-- [ ] Enable **log compaction** on the topic, keyed by `campaign_id` -- only
+- [x] Enable **log compaction** on the topic, keyed by `campaign_id` -- only
       the latest eligibility state per campaign matters, not full history.
 - [ ] Decide the "ineligible" action: delete the Pinecone vector outright
       vs. set an `eligible: false` metadata flag and filter on it. Leaning
       delete -- simpler, matches "the index only ever contains truly-
-      servable ads."
+      servable ads." (Still open -- this is a Phase 2 decision, not needed
+      to stand up the infra itself.)
 
 ## Phase 1 -- local infra (docker-compose)
 
-- [ ] Add a Kafka broker in **KRaft mode** (no Zookeeper -- current best
-      practice; Zookeeper is being phased out in Kafka 4.x).
-- [ ] Add a `debezium/connect` service (bundles Kafka Connect + the
+- [x] Add a Kafka broker in **KRaft mode** (no Zookeeper -- current best
+      practice; Zookeeper is being phased out in Kafka 4.x). Used
+      `apache/kafka:4.3.1` (verified as current stable at implementation
+      time -- the plan's original `4.0.0` was just a placeholder).
+- [x] Add a `debezium/connect` service (bundles Kafka Connect + the
       Postgres connector plugin already, no manual JAR install needed).
-- [ ] Reconfigure the Postgres service: `wal_level=logical`, bump
-      `max_wal_senders`/`max_replication_slots`. Requires **recreating**
-      the Postgres container (not just restarting) -- `wal_level` isn't
-      runtime-alterable. Existing local containers from before this change
-      won't have it set; note this for whoever runs `docker compose up`
-      next.
-- [ ] Register the Debezium connector via a REST POST to Connect's API
+      Used `quay.io/debezium/connect:3.6` (Docker Hub's `debezium/connect`
+      is stale; `quay.io` is the maintained location; `3.6` is newer than
+      the plan's original `3.5` placeholder).
+- [x] Reconfigure the Postgres service: `wal_level=logical`, bump
+      `max_wal_senders`/`max_replication_slots`. Requires
+      `docker compose up -d postgres`, **not** `restart` -- restart reuses
+      the already-running container's stale `command:`, only recreating the
+      container picks up a changed one. The `postgres_data` named volume is
+      untouched either way, no data loss. Verified live (Compose logged
+      "Recreate"/"Recreated", and `SELECT relreplident FROM pg_class WHERE
+      relname='campaigns'` plus a real UPDATE confirmed it took effect).
+- [x] Register the Debezium connector via a REST POST to Connect's API
       (`http://connect:8083/connectors`) -- not declared in docker-compose
-      itself, it's a runtime registration step. Script it as a
-      `make kafka-register-connector` target so it's not a manual one-off
-      every time the stack is recreated.
+      itself, it's a runtime registration step. Scripted as
+      `make kafka-register-connector`, verified idempotent (`201` first
+      run, `409` on re-run).
+
+### Bugs found during live verification (not catchable by planning alone)
+
+These only showed up once the stack was actually running -- worth recording
+so a future Phase 2 implementer (or anyone recreating this stack) doesn't
+hit them cold:
+
+1. **`KAFKA_CLUSTER_ID` is silently ignored -- use unprefixed `CLUSTER_ID`.**
+   The plan (and most Kafka docs/examples) suggest `KAFKA_CLUSTER_ID`, but
+   the `apache/kafka` image's entrypoint only reads a small set of
+   *unprefixed* vars for its own bootstrap logic -- `CLUSTER_ID` is one of
+   them, separate from the `KAFKA_*`-prefixed vars it translates into
+   `server.properties`. Setting `KAFKA_CLUSTER_ID` produced no error; the
+   container just logged `CLUSTER_ID not set. Setting it to default value`
+   and picked a random ID instead, which then mismatched the ID already
+   baked into the `kafka_data` volume on the next restart (`Cluster ID does
+   not match` failure). Fix: use `CLUSTER_ID` (unprefixed) in
+   `docker-compose.yml`. Required wiping the `kafka_data` volume once to
+   recover from the bad auto-generated ID already stored there.
+2. **`localhost:9092` doesn't work from *inside* the `kafka` container --
+   use `kafka:9092` even there.** `KAFKA_LISTENERS` binds the internal
+   listener specifically to `PLAINTEXT://kafka:9092`, not `0.0.0.0`, so
+   `kafka-topics.sh`/`kafka-cluster.sh` invocations run via
+   `docker compose exec kafka ...` must also target `kafka:9092`, not
+   `localhost:9092`, despite running "inside" that same container. Fixed
+   in both the `Makefile`'s `kafka-register-connector` target and the
+   verification commands below.
 
 ## Phase 2 -- consumer service
 
@@ -119,5 +155,24 @@ safety net for whatever small propagation lag remains.
 
 ## Status
 
-Not started. Next step when resumed: Phase 0's design decisions, then
-Phase 1's docker-compose changes.
+Phase 0 + Phase 1 done and live-verified (2026-07-30):
+
+- `wal_level=logical` set, `REPLICA IDENTITY FULL` applied and functionally
+  confirmed (an UPDATE's `payload.before.budget_spent` came through as
+  `0.0`, not null).
+- Kafka (KRaft, single node) and Kafka Connect running, cluster ID pinned
+  correctly after fixing the `CLUSTER_ID` bug above.
+- Topic `ad_recommender.public.campaigns` created with
+  `cleanup.policy=compact`.
+- Connector `ad-recommender-campaigns` registered and `RUNNING`; initial
+  snapshot (`op:"r"`) events observed for already-seeded campaigns; a live
+  `UPDATE` correctly produced an `op:"u"` event with correct before/after
+  values within seconds.
+- `make kafka-register-connector` confirmed idempotent (`409` on re-run).
+
+Not yet committed to git (`docker-compose.yml`, `Makefile`,
+`kafka/connectors/campaigns-connector.json`, the `REPLICA IDENTITY FULL`
+migration) -- pending user go-ahead.
+
+Next step when resumed: Phase 2, the Python consumer that actually reads
+these Kafka events and updates/deletes Pinecone vectors.

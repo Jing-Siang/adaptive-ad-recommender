@@ -1,6 +1,16 @@
 services:
   postgres:
     image: postgres:16-alpine
+    # wal_level=logical is required for Debezium's logical replication (see
+    # docs/kafka_cdc_plan.md) -- off by default since it costs a little extra
+    # disk/perf overhead Postgres won't pay unless something asks for it.
+    # max_wal_senders/max_replication_slots already default to 10 in PG13+,
+    # kept explicit here for documentation/headroom, not because they need
+    # to change. Applying this needs `docker compose up -d postgres`, not
+    # `restart` -- restart reuses the already-running container's stale
+    # command, only recreating the container picks up a changed `command:`.
+    # The postgres_data volume is untouched either way, no data loss.
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
     ports:
       - "5432:5432"
     environment:
@@ -14,6 +24,72 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+
+  # --- Kafka + Debezium CDC (opt-in, see `make kafka`) -----------------------
+  # Syncs campaigns table eligibility (status/budget) into Pinecone -- see
+  # docs/kafka_cdc_plan.md for the full design. Not started by `make infra`;
+  # these two services alone pull several hundred MB of JVM images, so people
+  # not touching this feature aren't forced to download them.
+
+  kafka:
+    image: apache/kafka:4.3.1
+    hostname: kafka
+    ports:
+      - "9094:9094" # host-exposed listener for local debugging tools only
+    environment:
+      # Single-node KRaft mode (no Zookeeper) -- this one container plays
+      # both the broker role (stores/serves messages) and controller role
+      # (manages cluster metadata, Kafka's own internal replacement for
+      # what Zookeeper used to do).
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Fixed, not left to auto-generate -- a random cluster ID picked on
+      # every container start conflicts with the previous run's ID already
+      # stored in the kafka_data volume ("Cluster ID does not match" on the
+      # second run). Any valid 22-char base64url UUID works here.
+      #
+      # NOTE: unprefixed CLUSTER_ID, not KAFKA_CLUSTER_ID -- verified live:
+      # the apache/kafka image's entrypoint only reads a small set of
+      # unprefixed vars for its own bootstrap logic (this one included),
+      # separate from the KAFKA_*-prefixed vars it translates into
+      # server.properties. KAFKA_CLUSTER_ID was silently ignored; the
+      # container's own logs showed "CLUSTER_ID not set. Setting it to
+      # default value" and picked a random one instead.
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  connect:
+    image: quay.io/debezium/connect:3.6
+    hostname: connect
+    ports:
+      - "8083:8083" # Kafka Connect REST API -- used to register the connector
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: "1"
+      # Connect's own state (registered connectors, configs, progress) is
+      # stored as Kafka topics, not a local file -- same "durable log over
+      # trusting memory" idea as CDC itself, just applied to Connect.
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "true"
+    depends_on:
+      - kafka
+      - postgres
 
   backend:
     build: ./backend
@@ -52,3 +128,4 @@ services:
 
 volumes:
   postgres_data:
+  kafka_data:
