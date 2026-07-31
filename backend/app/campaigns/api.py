@@ -8,7 +8,6 @@ from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
 from app.models import Advertiser, Campaign
 from app.core.queue import campaign_review_queue
-from app.campaigns.indexing import index_campaign
 from app.schemas import CampaignCreateRequest, CampaignResponse, ModerationRequest
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -71,7 +70,9 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db)) -> Campaign:
 @router.post("/{campaign_id}/moderate", response_model=CampaignResponse)
 def moderate_campaign(campaign_id: int, request: ModerationRequest, db: Session = Depends(get_db)) -> Campaign:
     """Human moderator resolves a needs_review campaign. No authentication — only
-    attribution (reviewed_by is a freeform name, not verified identity)."""
+    attribution (reviewed_by is a freeform name, not verified identity).
+    Embedding/indexing into Pinecone happens asynchronously via
+    pinecone_sync_consumer.py, not here (see docs/kafka_cdc_plan.md)."""
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="campaign not found")
@@ -91,9 +92,5 @@ def moderate_campaign(campaign_id: int, request: ModerationRequest, db: Session 
         outcome=request.outcome,
         reviewed_by=request.reviewed_by,
     )
-
-    if request.outcome == "approved":
-        index_campaign(campaign)
-        log_event("campaign_indexed", campaign_id=campaign_id)
 
     return campaign

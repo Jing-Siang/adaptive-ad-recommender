@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class Ad(BaseModel):
     """A single ad's content — what actually gets embedded into Pinecone.
     Filled in from an approved Campaign's headline/description/category
-    (see app/serving/retrieval.py:index_campaign)."""
+    (see app/campaigns/pinecone_sync_consumer.py)."""
 
     ad_id: str
     headline: str

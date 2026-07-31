@@ -52,6 +52,17 @@ def update_metadata(vector_id: str, metadata: dict, namespace: str) -> None:
     """Partial update -- only the given metadata fields are set (or added);
     any other existing metadata field (or the vector's own values) is left
     untouched. Used for e.g. appending to a user's blocklist without
-    disturbing interest_summary or the profile vector."""
+    disturbing interest_summary or the profile vector. No-op if the ID has
+    no existing record -- it can only edit something that's already there,
+    never create it (see pinecone_sync_consumer.py)."""
     index = get_index()
     index.update(id=vector_id, set_metadata=metadata, namespace=namespace)
+
+
+def delete_vector(vector_id: str, namespace: str) -> None:
+    """Idempotent -- deleting a nonexistent ID is a no-op in Pinecone.
+    Used by pinecone_sync_consumer.py only for true row removal (op:"d")
+    -- ineligible-but-still-existing campaigns are handled by
+    update_metadata instead, see the consumer's decision table."""
+    index = get_index()
+    index.delete(ids=[vector_id], namespace=namespace)

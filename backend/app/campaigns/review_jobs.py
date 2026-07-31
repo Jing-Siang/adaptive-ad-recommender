@@ -5,7 +5,6 @@ from app.core.db import SessionLocal
 from app.core.logging_utils import log_event
 from app.models import Campaign
 from app.campaigns.policy_review import review_campaign
-from app.campaigns.indexing import index_campaign
 
 REVIEWED_BY_AGENT = "ai_policy_agent"
 
@@ -19,7 +18,9 @@ _STATUS_FOR_OUTCOME = {
 
 def review_campaign_job(campaign_id: int) -> None:
     """RQ job: run the policy review agent against a campaign and persist the
-    outcome. Approved campaigns are embedded and indexed into Pinecone."""
+    outcome. Embedding/indexing into Pinecone happens asynchronously via
+    pinecone_sync_consumer.py, reacting to this status change over Kafka --
+    not done here (see docs/kafka_cdc_plan.md)."""
     db = SessionLocal()
     try:
         campaign = db.get(Campaign, campaign_id)
@@ -51,9 +52,5 @@ def review_campaign_job(campaign_id: int) -> None:
             status=campaign.status,
             reviewed_by=REVIEWED_BY_AGENT,
         )
-
-        if decision.outcome == "approved":
-            index_campaign(campaign)
-            log_event("campaign_indexed", campaign_id=campaign_id)
     finally:
         db.close()

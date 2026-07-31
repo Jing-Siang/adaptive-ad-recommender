@@ -1,6 +1,6 @@
 .PHONY: help install install-backend install-frontend infra infra-down migrate \
 	backend worker frontend seed test docker-up docker-down \
-	kafka kafka-down kafka-register-connector
+	kafka kafka-down kafka-register-connector kafka-consumer
 
 help:
 	@echo "adaptive-ad-recommender -- common dev commands"
@@ -20,9 +20,11 @@ help:
 	@echo "  make kafka                     Start Kafka + Debezium Connect (opt-in, see docs/kafka_cdc_plan.md)"
 	@echo "  make kafka-down                 Stop Kafka + Connect"
 	@echo "  make kafka-register-connector   Create the compacted topic + register the Debezium connector (safe to re-run)"
+	@echo "  make kafka-consumer             Run the Pinecone campaign sync consumer -- keep running in its own terminal"
 	@echo ""
 	@echo "Typical flow: make infra, then make backend / make worker / make frontend in three terminals."
-	@echo "For Kafka/CDC work, also run: make kafka && make kafka-register-connector"
+	@echo "For Kafka/CDC work, also run: make kafka && make kafka-register-connector && make kafka-consumer"
+	@echo "  (campaign approvals only become servable once kafka-consumer processes them -- it replaces the old synchronous indexing)"
 
 install: install-backend install-frontend
 
@@ -84,3 +86,6 @@ kafka-register-connector:
 	else \
 		echo "FAILED ($$code):"; cat /tmp/connector-response.json; exit 1; \
 	fi
+
+kafka-consumer:
+	cd backend && . .venv/bin/activate && python -m app.campaigns.pinecone_sync_consumer
