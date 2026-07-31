@@ -2,14 +2,27 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.core.logging_utils import log_event
 from app.core.vector_store import fetch_metadata, fetch_vector, get_index
 from app.models import Campaign, Event
 from app.schemas import AdCandidate
 
-# How many extra Pinecone matches to pull beyond top_k, since some will be
-# filtered out by campaign eligibility (budget/dates/status) after the fact --
-# that check can't move into Pinecone's own filter (see _eligible_campaign_ids).
+# How many extra Pinecone matches to pull beyond top_k. Pinecone's own query
+# now filters on status="active" and the start_date/end_date window (kept in
+# sync by pinecone_sync_consumer.py, see docs/kafka_cdc_plan.md), so most
+# ineligible ads are already excluded before this point -- this stays as a
+# safety net for what that can't cover: CDC propagation lag (status/budget
+# changes take a little time to reach Pinecone after the Postgres commit),
+# and campaigns whose Pinecone metadata hasn't been backfilled with dates
+# yet. Left unchanged rather than tuned down without real observed data on
+# how much less oversampling is actually needed now.
 _OVERSAMPLE_FACTOR = 3
+
+# Debezium/Postgres logical-replication encodes `date` columns as days since
+# the Unix epoch (io.debezium.time.Date) -- pinecone_sync_consumer.py passes
+# start_date/end_date straight through in that form, so "today" needs to be
+# expressed the same way to compare against them in Pinecone's filter.
+_EPOCH = date(1970, 1, 1)
 
 # How long a served ad is suppressed from reappearing to the same user after
 # an impression, to avoid the "same ad again immediately" feel during a
@@ -20,11 +33,13 @@ _ALREADY_SHOWN_WINDOW = timedelta(hours=1)
 
 def _eligible_campaign_ids(db: Session, candidate_ids: list[int]) -> set[int]:
     """Campaigns are only eligible to serve if still active, within budget, and
-    within their date window -- checked against Postgres (the source of truth),
-    not Pinecone metadata, which is never kept authoritative for this. Applied
-    as a post-filter (unlike blocklist/recently-shown below) because this data
-    can't be pushed into Pinecone's query-time filter without duplicating
-    Postgres as a second source of truth for status/budget."""
+    within their date window -- checked against Postgres (the source of truth)
+    regardless of what Pinecone's own status/date filter already did at query
+    time. Status/budget/dates are now also pushed into Pinecone (kept in sync
+    by pinecone_sync_consumer.py), which is what lets the oversample above stay
+    small in practice -- but this check stays as the final authority, since
+    Pinecone is a synced copy with real (if usually small) propagation lag,
+    never the source of truth itself."""
     if not candidate_ids:
         return set()
     today = date.today()
@@ -95,8 +110,20 @@ def retrieve_candidates(
         "namespace": "ads",
         "include_metadata": True,
     }
+    # status/dates are kept in sync by pinecone_sync_consumer.py -- filtering
+    # on them here is what actually makes the oversample above mostly
+    # unnecessary, not just documentation of intent. Still not a substitute
+    # for the Postgres check below (CDC propagation lag; campaigns not yet
+    # backfilled with date metadata).
+    today_epoch_days = (date.today() - _EPOCH).days
+    filter_ = {
+        "status": {"$eq": "active"},
+        "start_date": {"$lte": today_epoch_days},
+        "end_date": {"$gte": today_epoch_days},
+    }
     if excluded_ids:
-        query_kwargs["filter"] = {"campaign_id": {"$nin": sorted(excluded_ids)}}
+        filter_["campaign_id"] = {"$nin": sorted(excluded_ids)}
+    query_kwargs["filter"] = filter_
     result = index.query(**query_kwargs)
 
     matches = result["matches"]
@@ -119,4 +146,18 @@ def retrieve_candidates(
         )
         if len(candidates) >= top_k:
             break
+
+    # Observability for _OVERSAMPLE_FACTOR tuning: trimmed = how many of
+    # Pinecone's own (already status/date-filtered) matches still got cut by
+    # the Postgres safety net -- almost entirely CDC propagation lag at this
+    # point. Log real data before ever changing the factor's value again
+    # (see docs/kafka_cdc_plan.md Phase 4) rather than guessing.
+    log_event(
+        "retrieve_candidates_oversample",
+        top_k=top_k,
+        pinecone_matches=len(matches),
+        trimmed_by_postgres_check=len(candidate_ids) - len(eligible_ids),
+        returned=len(candidates),
+        short=len(candidates) < top_k,
+    )
     return candidates
