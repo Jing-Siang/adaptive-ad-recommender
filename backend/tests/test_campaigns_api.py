@@ -83,8 +83,7 @@ def test_list_campaigns_filters_by_status(db, campaign):
     assert campaign.id not in [c["id"] for c in resp_other.json()]
 
 
-@patch("app.campaigns.api.index_campaign")
-def test_moderate_campaign_approve_indexes_and_activates(mock_index, db, campaign):
+def test_moderate_campaign_approve_activates(db, campaign):
     campaign.status = "needs_review"
     db.commit()
 
@@ -98,11 +97,9 @@ def test_moderate_campaign_approve_indexes_and_activates(mock_index, db, campaig
     assert data["status"] == "active"
     assert data["reviewed_by"] == "pytest-moderator"
     assert data["review_reason"] == "looks fine to a human"
-    mock_index.assert_called_once()
 
 
-@patch("app.campaigns.api.index_campaign")
-def test_moderate_campaign_reject_does_not_index(mock_index, db, campaign):
+def test_moderate_campaign_reject_sets_status(db, campaign):
     campaign.status = "needs_review"
     db.commit()
 
@@ -113,7 +110,6 @@ def test_moderate_campaign_reject_does_not_index(mock_index, db, campaign):
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "rejected"
-    mock_index.assert_not_called()
 
 
 def test_moderate_campaign_wrong_status_returns_409(db, campaign):

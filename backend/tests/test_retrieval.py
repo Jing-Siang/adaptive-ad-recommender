@@ -1,10 +1,17 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from unittest.mock import MagicMock, patch
 
 from app.models import Event
 from app.serving.retrieval import _recently_shown_campaign_ids, retrieve_candidates
+
+_TODAY_EPOCH_DAYS = (date.today() - date(1970, 1, 1)).days
+_ELIGIBILITY_FILTER = {
+    "status": {"$eq": "active"},
+    "start_date": {"$lte": _TODAY_EPOCH_DAYS},
+    "end_date": {"$gte": _TODAY_EPOCH_DAYS},
+}
 
 
 def test_recently_shown_campaign_ids_respects_time_window(db, campaign):
@@ -77,7 +84,9 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(
     _, kwargs = mock_index.query.call_args
     assert kwargs["namespace"] == "ads"
     assert kwargs["top_k"] == 5 * 3  # oversampled, since some matches may be ineligible
-    assert "filter" not in kwargs  # nothing to exclude -> no filter param at all
+    # status/date-window filter is unconditional now; campaign_id $nin is
+    # still only added when there's something to exclude.
+    assert kwargs["filter"] == _ELIGIBILITY_FILTER
 
 
 @patch("app.serving.retrieval._recently_shown_campaign_ids", return_value=set())
@@ -152,7 +161,7 @@ def test_retrieve_candidates_passes_blocklist_as_pinecone_filter(
     candidates = retrieve_candidates(mock_db, "user-123", top_k=5)
 
     _, kwargs = mock_index.query.call_args
-    assert kwargs["filter"] == {"campaign_id": {"$nin": [1]}}
+    assert kwargs["filter"] == {**_ELIGIBILITY_FILTER, "campaign_id": {"$nin": [1]}}
     assert len(candidates) == 1
     assert candidates[0].ad_id == "2"
 
@@ -175,7 +184,7 @@ def test_retrieve_candidates_combines_blocklist_and_recently_shown_in_filter(
     retrieve_candidates(mock_db, "user-123", top_k=5)
 
     _, kwargs = mock_index.query.call_args
-    assert kwargs["filter"] == {"campaign_id": {"$nin": [1, 3, 4]}}
+    assert kwargs["filter"] == {**_ELIGIBILITY_FILTER, "campaign_id": {"$nin": [1, 3, 4]}}
 
 
 @patch("app.serving.retrieval.fetch_vector", return_value=None)
