@@ -39,11 +39,17 @@ safety net for whatever small propagation lag remains.
       Schema Registry at this project's scale.
 - [x] Enable **log compaction** on the topic, keyed by `campaign_id` -- only
       the latest eligibility state per campaign matters, not full history.
-- [ ] Decide the "ineligible" action: delete the Pinecone vector outright
-      vs. set an `eligible: false` metadata flag and filter on it. Leaning
-      delete -- simpler, matches "the index only ever contains truly-
-      servable ads." (Still open -- this is a Phase 2 decision, not needed
-      to stand up the infra itself.)
+- [x] Decide the "ineligible" action: **never delete for eligibility
+      reasons** -- keep the vector, patch its `status` metadata field
+      instead. (Reversed from this doc's original "leaning delete" during
+      Phase 2 design: deleting would strand a vector every time a later
+      edit landed on an already-ineligible campaign, since Pinecone's
+      partial-update call is a no-op on a missing record -- it can only
+      edit something that already exists, never recreate it. Mirroring
+      the row instead sidesteps that entirely; `retrieval.py`'s new
+      `status` query filter is what actually keeps ineligible ads out of
+      results, not the vector's existence.) The vector is only ever
+      deleted for a genuine Postgres row removal (`op:"d"`).
 
 ## Phase 1 -- local infra (docker-compose)
 
@@ -99,37 +105,110 @@ hit them cold:
 
 ## Phase 2 -- consumer service
 
-- [ ] New long-running Python process:
-      `backend/app/campaigns/eligibility_sync_consumer.py`, using
-      `confluent-kafka` (standard maintained Python client, add to
-      `requirements.txt`).
-- [ ] Add as its own docker-compose service + `make kafka-consumer` target
-      -- it's a persistent streaming loop, not an RQ job, so it doesn't fit
-      the existing worker pattern/`rq worker` invocation.
-- [ ] Parse Debezium's envelope shape (`payload.before` / `payload.after` /
-      `payload.op` -- c/u/d/r for create/update/delete/read-snapshot).
-- [ ] For each event: compute eligibility from the `after` row image,
-      delete/update the Pinecone vector accordingly. Must be idempotent --
-      reprocessing the same event twice (restart, at-least-once delivery)
-      should be harmless. Upsert/delete already are.
-- [ ] Decide + implement dead-letter handling for malformed events (see
-      Phase 5) so one bad event can't wedge the whole sync.
+- [x] New long-running Python process:
+      `backend/app/campaigns/pinecone_sync_consumer.py` (renamed from the
+      original `eligibility_sync_consumer.py` sketch -- its actual job
+      grew beyond eligibility, see below), using `confluent-kafka`.
+      Scope expanded during design discussion: the consumer owns **all**
+      Postgres -> Pinecone sync for campaigns (add/update/delete), not
+      just eligibility. A consumer that only ever deletes on ineligibility
+      still left the synchronous app-layer `index_campaign()` calls as a
+      second thing writing to Pinecone on approval -- the exact dual-write
+      hazard CDC exists to remove. Those calls are now gone:
+      `campaigns/review_jobs.py` and `campaigns/api.py`'s moderate
+      endpoint no longer call `index_campaign()` at all; the consumer is
+      the only thing that writes ad vectors into Pinecone.
+- [x] `make kafka-consumer` target added (native host process, matching
+      how `backend`/`worker` already run -- **not** a docker-compose
+      service; see the "why native, not containerized" note below).
+- [x] Parses Debezium's envelope shape (`payload.before`/`payload.after`/
+      `payload.op`).
+- [x] Decision table, derived from `after` alone and checked uniformly for
+      every event (snapshot or live):
+      ```
+      op == "d"                                   -> delete_vector(before.id)
+      op == "r" (snapshot) and status == "active"  -> no-op (trust existing indexed state, avoid re-embed cost on every restart)
+      status == "active" and (before is None or before.status != "active" or creative field changed) -> re-embed + upsert
+      otherwise                                    -> update_metadata({"status": after.status})
+      ```
+      `before.status != "active"` forces a full re-embed rather than a
+      metadata patch even when the creative is unchanged, because an
+      inactive campaign never has a Pinecone record at all -- a metadata
+      patch can only edit something that already exists, never create it.
+      Every action here is idempotent, so at-least-once redelivery
+      (`enable.auto.commit=False`, manual commit after processing) is
+      safe.
+- [x] Malformed-message handling: catch, log, commit past it -- a
+      pragmatic stopgap, not the structured dead-letter topic described in
+      Phase 5 (still not built).
+
+**Why a native process, not a docker-compose service**: this project's
+documented flow runs `backend`/`worker`/`frontend` natively via `make`
+against dockerized infra (`localhost`-mapped ports), not via
+`docker-up`'s containerized versions of those same services -- and
+`docker-up` currently has a latent, pre-existing gap unrelated to this
+work (`backend/.env`'s `DATABASE_URL`/`REDIS_URL` use `localhost`, which
+doesn't resolve to the `postgres`/`redis` containers from inside another
+container). The consumer follows the same native-process convention:
+`kafka_bootstrap_servers` defaults to `localhost:9094`, the host-exposed
+listener from Phase 1, not `kafka:9092`.
+
+**Operational consequence**: approving a campaign no longer makes it
+servable in the same request -- it becomes servable once the consumer
+processes the resulting Kafka event (bounded by Debezium+Kafka lag,
+measured ~100-500ms live in Phase 1). `make kafka-consumer` now has to be
+running for approvals to actually take effect, same as `make worker`
+already does for reviews -- no data loss if it's briefly down (the
+compacted topic retains at least the latest event per key indefinitely),
+just a visible new local-dev requirement.
 
 ## Phase 3 -- backfill existing catalog
 
-- [ ] Debezium's initial connector registration does a full snapshot of
-      the existing table (emitted as synthetic "read" events) -- confirm
-      the consumer handles these identically to live events, so it
-      corrects any drift that accumulated *before* CDC existed (e.g.
-      already-completed campaigns still sitting in Pinecone today).
+- [x] Achieved as a side effect of the Phase 2 decision table, not
+      separate logic: Debezium's initial snapshot produces `op:"r"` events
+      for every existing row, and any snapshot row that's already
+      ineligible falls into the same `update_metadata` bucket a live
+      ineligibility change would -- correcting stale pre-CDC drift (e.g. a
+      long-completed campaign whose Pinecone record still said
+      `"status": "active"`) the first time the consumer ever runs, with no
+      dedicated backfill code path needed.
 
 ## Phase 4 -- update retrieval.py to actually benefit from this
 
-- [ ] Keep `_eligible_campaign_ids`'s Postgres check as a cheap final
-      safety net (there's always some propagation lag, however small).
-- [ ] Shrink `_INITIAL_OVERSAMPLE_FACTOR` now that Pinecone's own results
-      should mostly already be eligible -- but keep the adaptive retry
-      logic regardless (never fully trust a freshness guarantee blindly).
+- [x] `_eligible_campaign_ids`'s Postgres check stays as-is, unconditional
+      safety net -- Pinecone is a synced copy with real (if usually small)
+      propagation lag, never the source of truth itself.
+- [x] `retrieval.py`'s Pinecone query now filters on `status: {"$eq":
+      "active"}` unconditionally (previously nothing filtered on status at
+      query time at all) -- this is what actually makes the oversample
+      below do less work, not just documentation of intent.
+- [x] **Date-window eligibility (`start_date`/`end_date`) also pushed into
+      Pinecone**, corrected from this doc's earlier "never pushed into
+      Pinecone at all" framing -- that framing conflated two different
+      cases. Status/budget need CDC because they change asynchronously and
+      unpredictably (a budget debit, a report, a re-approval -- no way to
+      know in advance). Dates are the opposite: set once at campaign
+      creation and never mutated again, so there's no staleness risk in
+      writing them into Pinecone metadata once and filtering on them
+      against `today` (computed fresh at query time) -- no event-driven
+      sync needed at all. Debezium already encodes Postgres `date` columns
+      as epoch-day integers in the JSON payload, so the consumer passes
+      them straight through with no conversion; `retrieval.py` computes
+      `(date.today() - date(1970,1,1)).days` to compare in the same units.
+      Required a one-time backfill: existing active campaigns' Pinecone
+      records predated this metadata shape, so a bare `start_date`/
+      `end_date` range filter would have silently excluded them until
+      *something* touched their row again. Fixed by changing the
+      consumer's "snapshot of an already-active row" case from a pure
+      no-op to a cheap `update_metadata` (status + dates, no re-embed) --
+      then resetting the consumer group's offset to earliest and replaying
+      all 400 topic messages (`kafka-consumer-groups.sh --reset-offsets
+      --to-earliest`), confirmed zero errors and lag back to 0. Verified
+      both directions live: a temporarily out-of-window end_date correctly
+      dropped a campaign from a filtered query, reverting brought it back.
+- [ ] Shrink `_OVERSAMPLE_FACTOR`'s value -- deliberately left unchanged
+      for now; tuning a magic number without real observed data on how
+      much less oversampling is actually needed would be guessing.
 
 ## Phase 5 -- operational basics
 
@@ -155,24 +234,136 @@ hit them cold:
 
 ## Status
 
-Phase 0 + Phase 1 done and live-verified (2026-07-30):
+Phase 0 + Phase 1 done and live-verified (2026-07-30), committed
+(`621eacd`).
 
-- `wal_level=logical` set, `REPLICA IDENTITY FULL` applied and functionally
-  confirmed (an UPDATE's `payload.before.budget_spent` came through as
-  `0.0`, not null).
-- Kafka (KRaft, single node) and Kafka Connect running, cluster ID pinned
-  correctly after fixing the `CLUSTER_ID` bug above.
-- Topic `ad_recommender.public.campaigns` created with
-  `cleanup.policy=compact`.
-- Connector `ad-recommender-campaigns` registered and `RUNNING`; initial
-  snapshot (`op:"r"`) events observed for already-seeded campaigns; a live
-  `UPDATE` correctly produced an `op:"u"` event with correct before/after
-  values within seconds.
-- `make kafka-register-connector` confirmed idempotent (`409` on re-run).
+Phase 2, 3, and part of Phase 4 implemented (2026-07-31):
 
-Not yet committed to git (`docker-compose.yml`, `Makefile`,
-`kafka/connectors/campaigns-connector.json`, the `REPLICA IDENTITY FULL`
-migration) -- pending user go-ahead.
+- `backend/app/campaigns/pinecone_sync_consumer.py` written, implementing
+  the decision table above.
+- `index_campaign()`'s synchronous call sites removed from
+  `campaigns/review_jobs.py` and `campaigns/api.py`.
+- `retrieval.py` now filters on `status` at Pinecone query time.
+- `make kafka-consumer` target added; `kafka_bootstrap_servers` config +
+  `confluent-kafka` dependency added.
+- Tests updated: the 5 tests in `test_review_jobs.py` and 2 in
+  `test_campaigns_api.py` that patched/asserted on `index_campaign()` were
+  rewritten to only assert status transitions (all 14 tests in both files
+  pass against live Postgres).
 
-Next step when resumed: Phase 2, the Python consumer that actually reads
-these Kafka events and updates/deletes Pinecone vectors.
+**Live-verified end-to-end (2026-07-31)**, all 8 manual verification steps
+passed:
+
+- Campaign 217 flipped to `completed` via psql -- consumer patched its
+  `status` metadata, vector stayed (never deleted for eligibility).
+- Reverted to `active` via psql (no app involvement) -- consumer
+  re-embedded and upserted it, fully restoring servability with zero app
+  code involved.
+- Headline edited while active -- re-embedded (creative field changed).
+- `reviewed_by` edited while active -- metadata-only update, no re-embed.
+- Consumer restarted multiple times mid-verification -- resumed from its
+  committed offset each time, no crashes, no duplicate-write errors.
+- Through the real API: submitted a new campaign, confirmed no Pinecone
+  record while `pending_review`; approved it via `/campaigns/{id}/moderate`
+  -- confirmed the API response came back before anything existed in
+  Pinecone, and only after running the consumer did it appear, correctly
+  indexed and queryable with `status: "active"`.
+- Bonus, unplanned but useful: an earlier `pytest` run's fixtures created
+  and deleted several real campaign rows against live Postgres during this
+  session, which the consumer picked up and processed identically to
+  everything else (`reembedded` on fixture approval, `deleted` on fixture
+  teardown) -- zero errors across ~15 extra real events, a good organic
+  stress test of the `op:"d"` path this project's own code doesn't
+  otherwise exercise.
+
+**Operational lesson learned during verification, worth recording**: each
+short (~15-30s) test run of the consumer sometimes appeared to "miss" an
+event that, on investigation via `kafka-consumer-groups.sh --describe`,
+turned out to just be real, undrained consumer-group lag -- each Pinecone/
+OpenAI round-trip takes roughly 1-1.5s, so a burst of several events
+backlogged from rapid manual testing needs a correspondingly longer window
+to fully catch up. Not a bug; just don't assume "no new log line" means
+"nothing left to process" -- check lag directly if a change doesn't show
+up as fast as expected.
+
+**Date-window eligibility + observability added (2026-08-01)**, closing out
+the rest of Phase 4:
+
+- `pinecone_sync_consumer.py`'s metadata now includes `start_date`/
+  `end_date` (`_metadata_for`/`_status_metadata_for`); the "snapshot of an
+  already-active row" case changed from a pure no-op to a cheap
+  `update_metadata` call, specifically so it backfills dates without a
+  full re-embed.
+- One-time backfill performed: `kafka-consumer-groups.sh --reset-offsets
+  --to-earliest` + a full replay of all 400 topic messages, confirmed zero
+  errors and lag back to 0 afterward.
+- `retrieval.py`'s Pinecone query now also filters on the date window
+  (`start_date`/`end_date` compared against `today`, encoded as
+  epoch-days to match Debezium's `io.debezium.time.Date` representation).
+  Live-verified both directions: temporarily setting an active campaign's
+  `end_date` to yesterday correctly dropped it from a filtered query;
+  reverting brought it back.
+- `retrieve_candidates` now logs `retrieve_candidates_oversample` (Pinecone
+  match count, how many got trimmed by the Postgres safety net, whether
+  the result came up short of `top_k`) -- decided explicitly *not* to
+  change `_OVERSAMPLE_FACTOR`'s value yet, collect real data first and
+  revisit once there's something to tune against, rather than guess.
+- 3 tests in `test_retrieval.py` updated (`_ELIGIBILITY_FILTER` fixture
+  constant) to match the new unconditional status/date filter shape; full
+  non-LLM test suite (68 tests) passes.
+
+**Real measured latency (2026-08-01)**, replacing an earlier wrong guess
+in this doc (that a metadata-only Pinecone write was ~50-150ms -- it
+isn't; that number came from a `query()` response header, a *read*, and
+was wrongly generalized to `update()`/`delete()` writes):
+
+Per-action-type averages, computed from real timestamps across the
+400-message date-window backfill replay:
+
+| action | count | avg | min | max |
+| --- | --- | --- | --- | --- |
+| `snapshot_metadata_refreshed` | 287 | 1.122s | 0.908s | 2.743s |
+| `metadata_updated` | 34 | 1.033s | 0.951s | 1.180s |
+| `deleted` | 25 | 1.025s | 0.942s | 1.152s |
+| `reembedded` | 28 | 1.708s | 1.278s | 4.076s |
+
+Every Pinecone *write* call -- metadata patch, delete, or upsert --
+appears to have a roughly 1-second floor in this environment, not the
+near-instant cost originally assumed; a re-embed adds ~0.6-0.7s more on
+top for the OpenAI call itself. This floor, not OpenAI, is what actually
+dominates the common case, since ~93% of events in the backfill never
+touched OpenAI at all.
+
+Confirmed with a clean, isolated, steady-state (zero backlog) live test:
+created a fresh campaign, approved it via the real `/moderate` endpoint,
+polled Pinecone until visible. API response at `t3`; consumer's own log
+timestamp for the resulting `reembedded` event was **2.08s** after `t3`
+(polling detected it at 2.54s, the extra ~0.46s being poll-interval
+granularity, not real additional lag) -- consistent with the backfill's
+`reembedded` average (1.708s) plus normal WAL/Kafka transit time.
+
+**Bottom line**: a change requiring re-embed (an approval, a creative
+edit) takes roughly **2-2.5s** steady-state. A change that doesn't (a
+status flip, a budget debit, an unrelated field edit -- the ~93% common
+case) should be roughly **1-1.5s**, since it skips the OpenAI call. Both
+numbers assume the consumer is caught up (lag=0) -- see the next note for
+what happens when it isn't.
+
+**Second operational lesson, more important than the first**: mid-session,
+`kafka-consumer-groups.sh --describe` showed **732** total messages
+backlogged, which looked alarming until traced to its actual cause: this
+project's tests run against the real dev Postgres (not an isolated test
+database), so every `pytest` run's fixture-created/deleted campaign rows
+generate real WAL activity that Debezium faithfully captures into Kafka --
+and the consumer had only ever been run in short manual bursts (15-60s at
+a time) rather than as a standing background process, so backlog from
+several `pytest` runs accumulated unnoticed in between. Nothing was lost
+or wrong (that's exactly what a durable log is supposed to do), but it
+produced a misleadingly huge latency reading the first time a live test
+happened to land behind that backlog. **The consumer should run
+continuously during any dev/test session involving this table**, the same
+way `make worker` does -- not spun up only when specifically checking
+something -- to avoid both the confusion and the backlog itself.
+
+Not yet committed to git (this Phase 2 slice) -- pending user go-ahead,
+same as Phase 0/1 was before it.
