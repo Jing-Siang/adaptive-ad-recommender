@@ -180,8 +180,8 @@ just a visible new local-dev requirement.
       propagation lag, never the source of truth itself.
 - [x] `retrieval.py`'s Pinecone query now filters on `status: {"$eq":
       "active"}` unconditionally (previously nothing filtered on status at
-      query time at all) -- this is what actually makes the oversample
-      below do less work, not just documentation of intent.
+      query time at all) -- this is what makes fetching exactly `top_k`
+      (see below) viable instead of needing to over-fetch.
 - [x] **Date-window eligibility (`start_date`/`end_date`) also pushed into
       Pinecone**, corrected from this doc's earlier "never pushed into
       Pinecone at all" framing -- that framing conflated two different
@@ -206,9 +206,38 @@ just a visible new local-dev requirement.
       --to-earliest`), confirmed zero errors and lag back to 0. Verified
       both directions live: a temporarily out-of-window end_date correctly
       dropped a campaign from a filtered query, reverting brought it back.
-- [ ] Shrink `_OVERSAMPLE_FACTOR`'s value -- deliberately left unchanged
-      for now; tuning a magic number without real observed data on how
-      much less oversampling is actually needed would be guessing.
+- [x] **`_OVERSAMPLE_FACTOR` removed entirely** (2026-08-01) --
+      `retrieve_candidates` now asks Pinecone for exactly `top_k`, no
+      multiplier. Got here through two rounds of testing, the first of
+      which was misleading:
+      - Baseline (quiet system): 10 calls, 0 trimmed by the Postgres
+        safety net every time.
+      - First stress test: flipped 140 of 288 campaigns (~49% of the
+        entire catalog) simultaneously, at `top_k=10` (oversample fetching
+        30). Found up to 16 trimmed in a single call -- at face value,
+        evidence *for* keeping a large multiplier. This was wrong to
+        generalize from: (a) this app has no organic code path that
+        changes half the catalog at once -- only a deliberate bulk SQL
+        test does that -- and (b) it used `top_k=10`, not the real
+        frontend's `top_k=50` (`frontend/src/components/Feed.tsx`'s
+        `BATCH_SIZE`), understating the real margin by 5x.
+      - Corrected stress test: flipped a realistic 8 of 288 campaigns
+        (organic-scale churn) at the real `top_k=50`. Result: **0 trims
+        across 18 calls**, even while hammering the endpoint during the
+        active drain window.
+      - Also measured the oversampling's own cost directly, since keeping
+        it "as free insurance" was itself an unverified assumption:
+        Pinecone query latency at `top_k` 50/100/150/250 was flat
+        (~0.23-0.28s regardless) -- oversampling turned out to be
+        low-cost, not the meaningful cost first assumed either. So the
+        removal isn't a performance optimization; it's because an
+        occasional short batch is fine for a scrolling feed (the frontend
+        just shows fewer ads that scroll, the user gets the rest next
+        batch) and the large-scale trimming scenario that would matter
+        isn't one this app can actually produce.
+      - `retrieve_candidates_oversample` logging kept, renamed
+        `retrieve_candidates_trim` -- now the ongoing signal for "is this
+        actually happening in practice," not a one-time tuning input.
 
 ## Phase 5 -- operational basics
 
@@ -303,11 +332,11 @@ the rest of Phase 4:
   Live-verified both directions: temporarily setting an active campaign's
   `end_date` to yesterday correctly dropped it from a filtered query;
   reverting brought it back.
-- `retrieve_candidates` now logs `retrieve_candidates_oversample` (Pinecone
+- `retrieve_candidates` now logs `retrieve_candidates_trim` (Pinecone
   match count, how many got trimmed by the Postgres safety net, whether
-  the result came up short of `top_k`) -- decided explicitly *not* to
-  change `_OVERSAMPLE_FACTOR`'s value yet, collect real data first and
-  revisit once there's something to tune against, rather than guess.
+  the result came up short of `top_k`) -- added to collect real data
+  before touching `_OVERSAMPLE_FACTOR`, rather than guess. That data
+  later led to removing it entirely, see the dated entry below.
 - 3 tests in `test_retrieval.py` updated (`_ELIGIBILITY_FILTER` fixture
   constant) to match the new unconditional status/date filter shape; full
   non-LLM test suite (68 tests) passes.
@@ -420,6 +449,14 @@ multiple there since the ~0.6-0.7s OpenAI call is a fixed cost the fix
 doesn't touch), holding steady across a sustained run of hundreds of
 consecutive calls -- p99 stays close to the mean in all three cases, no
 sign of degradation, rate-limiting, or connection exhaustion under load.
+
+**`_OVERSAMPLE_FACTOR` removed (2026-08-01)** -- see Phase 4 above for the
+full story, including a stress test that initially argued the wrong way
+(tested an unrealistic 49%-of-catalog churn burst at the wrong `top_k`)
+before a corrected, realistic test showed the actual risk to be
+negligible. `retrieve_candidates` now fetches exactly `top_k` from
+Pinecone; an occasional short batch is an accepted, harmless outcome for
+a scrolling feed, not something to over-fetch against on every call.
 
 Not yet committed to git (this Phase 2 slice) -- pending user go-ahead,
 same as Phase 0/1 was before it.
