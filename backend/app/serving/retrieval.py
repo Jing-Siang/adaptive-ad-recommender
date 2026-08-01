@@ -7,17 +7,6 @@ from app.core.vector_store import fetch_metadata, fetch_vector, get_index
 from app.models import Campaign, Event
 from app.schemas import AdCandidate
 
-# How many extra Pinecone matches to pull beyond top_k. Pinecone's own query
-# now filters on status="active" and the start_date/end_date window (kept in
-# sync by pinecone_sync_consumer.py, see docs/kafka_cdc_plan.md), so most
-# ineligible ads are already excluded before this point -- this stays as a
-# safety net for what that can't cover: CDC propagation lag (status/budget
-# changes take a little time to reach Pinecone after the Postgres commit),
-# and campaigns whose Pinecone metadata hasn't been backfilled with dates
-# yet. Left unchanged rather than tuned down without real observed data on
-# how much less oversampling is actually needed now.
-_OVERSAMPLE_FACTOR = 3
-
 # Debezium/Postgres logical-replication encodes `date` columns as days since
 # the Unix epoch (io.debezium.time.Date) -- pinecone_sync_consumer.py passes
 # start_date/end_date straight through in that form, so "today" needs to be
@@ -35,11 +24,10 @@ def _eligible_campaign_ids(db: Session, candidate_ids: list[int]) -> set[int]:
     """Campaigns are only eligible to serve if still active, within budget, and
     within their date window -- checked against Postgres (the source of truth)
     regardless of what Pinecone's own status/date filter already did at query
-    time. Status/budget/dates are now also pushed into Pinecone (kept in sync
-    by pinecone_sync_consumer.py), which is what lets the oversample above stay
-    small in practice -- but this check stays as the final authority, since
-    Pinecone is a synced copy with real (if usually small) propagation lag,
-    never the source of truth itself."""
+    time. Status/budget/dates are kept in sync in Pinecone by
+    pinecone_sync_consumer.py, but this check stays as the final authority,
+    since Pinecone is a synced copy with real (if usually small) propagation
+    lag, never the source of truth itself."""
     if not candidate_ids:
         return set()
     today = date.today()
@@ -106,15 +94,19 @@ def retrieve_candidates(
     index = get_index()
     query_kwargs = {
         "vector": vector,
-        "top_k": top_k * _OVERSAMPLE_FACTOR,
+        "top_k": top_k,
         "namespace": "ads",
         "include_metadata": True,
     }
-    # status/dates are kept in sync by pinecone_sync_consumer.py -- filtering
-    # on them here is what actually makes the oversample above mostly
-    # unnecessary, not just documentation of intent. Still not a substitute
-    # for the Postgres check below (CDC propagation lag; campaigns not yet
-    # backfilled with date metadata).
+    # status/dates are kept in sync by pinecone_sync_consumer.py, so this
+    # query is already status/date-correct at the source almost all the
+    # time -- no oversampling beyond top_k. A no-longer-eligible campaign
+    # can still occasionally slip through during the brief CDC propagation
+    # window (measured: negligible under realistic churn, see
+    # docs/kafka_cdc_plan.md Phase 4); when that happens the Postgres check
+    # below just returns fewer than top_k rather than over-fetching on
+    # every call to guard against it -- an occasional shorter batch is fine
+    # for a scrolling feed, not worth paying for on every request.
     today_epoch_days = (date.today() - _EPOCH).days
     filter_ = {
         "status": {"$eq": "active"},
@@ -130,30 +122,26 @@ def retrieve_candidates(
     candidate_ids = [int(match["id"]) for match in matches]
     eligible_ids = _eligible_campaign_ids(db, candidate_ids)
 
-    candidates = []
-    for match in matches:
-        if int(match["id"]) not in eligible_ids:
-            continue
-        candidates.append(
-            AdCandidate(
-                ad_id=match["id"],
-                headline=match["metadata"]["headline"],
-                description=match["metadata"]["description"],
-                category=match["metadata"]["category"],
-                price=match["metadata"].get("price"),
-                similarity_score=match["score"],
-            )
+    candidates = [
+        AdCandidate(
+            ad_id=match["id"],
+            headline=match["metadata"]["headline"],
+            description=match["metadata"]["description"],
+            category=match["metadata"]["category"],
+            price=match["metadata"].get("price"),
+            similarity_score=match["score"],
         )
-        if len(candidates) >= top_k:
-            break
+        for match in matches
+        if int(match["id"]) in eligible_ids
+    ]
 
-    # Observability for _OVERSAMPLE_FACTOR tuning: trimmed = how many of
-    # Pinecone's own (already status/date-filtered) matches still got cut by
-    # the Postgres safety net -- almost entirely CDC propagation lag at this
-    # point. Log real data before ever changing the factor's value again
-    # (see docs/kafka_cdc_plan.md Phase 4) rather than guessing.
+    # Watches how often the Postgres safety net actually has to trim a
+    # Pinecone match (CDC propagation lag) -- expected to be rare. A short
+    # batch here just means fewer ads this scroll, not an error; if `short`
+    # starts showing up often in practice, that's the signal to revisit
+    # this (see docs/kafka_cdc_plan.md Phase 4), not a fixed oversample.
     log_event(
-        "retrieve_candidates_oversample",
+        "retrieve_candidates_trim",
         top_k=top_k,
         pinecone_matches=len(matches),
         trimmed_by_postgres_check=len(candidate_ids) - len(eligible_ids),

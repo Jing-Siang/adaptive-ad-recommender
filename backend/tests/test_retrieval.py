@@ -56,7 +56,7 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(
     mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible, mock_recent
 ):
     """A single eligible Pinecone match maps to an AdCandidate with the right
-    fields, and the query is oversampled 3x top_k as designed."""
+    fields; the Pinecone query asks for exactly top_k, no oversampling."""
     mock_index = MagicMock()
     mock_index.query.return_value = {
         "matches": [
@@ -83,7 +83,7 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(
     mock_index.query.assert_called_once()
     _, kwargs = mock_index.query.call_args
     assert kwargs["namespace"] == "ads"
-    assert kwargs["top_k"] == 5 * 3  # oversampled, since some matches may be ineligible
+    assert kwargs["top_k"] == 5
     # status/date-window filter is unconditional now; campaign_id $nin is
     # still only added when there's something to exclude.
     assert kwargs["filter"] == _ELIGIBILITY_FILTER
