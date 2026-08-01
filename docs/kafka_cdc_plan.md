@@ -365,5 +365,61 @@ continuously during any dev/test session involving this table**, the same
 way `make worker` does -- not spun up only when specifically checking
 something -- to avoid both the confusion and the backlog itself.
 
+**Performance fix (2026-08-01)**: `vector_store.py`'s `get_index()` was
+constructing a fresh Pinecone `Index()` object on every single call instead
+of reusing one, unlike `_get_client()` right above it -- not a
+request-scoping need (both the FastAPI serving path and this consumer
+already run as single long-lived processes), just an inconsistency from
+when the file was first written. Added `@lru_cache`, matching
+`_get_client()`. Measured directly, twice: `update_metadata` calls went
+from ~1.1s each to ~0.3s each (first call always pays one-time connection
+setup regardless). This benefits every Pinecone operation in the app, not
+just the consumer.
+
+Retesting end-to-end live afterward showed a more complete picture worth
+recording: the per-event Pinecone-write time really did drop ~3-4x as
+measured, but a live approve-flow test's *total* latency didn't improve
+proportionally, because that particular run was dominated by WAL ->
+Debezium -> Kafka delivery time, not consumer processing -- a separate
+part of the pipeline this fix doesn't touch, and one that appears more
+variable under system load than the single ~100-500ms figure from the
+original Phase 1 measurement suggested. Doesn't change the correctness
+conclusion (Postgres stays the real-time safety net regardless of Pinecone
+lag), just means "how long until Pinecone catches up" has two largely
+independent contributors, not one.
+
+**Load test validating the fix at volume (2026-08-01)**: the numbers above
+came from small samples (n=25-88, mostly incidental) or single live runs
+that mixed in WAL/Kafka transit noise. To get a statistically credible
+before/after, ran 300 synthetic campaigns through the full lifecycle --
+bulk create (`pending_review`) -> bulk approve (`active`, forces re-embed)
+-> bulk complete (`completed`, metadata-only) -> bulk delete -- via direct
+SQL against live Postgres, watching the real consumer process the
+resulting ~1,200+ Kafka events (each delete also emits a compaction
+tombstone).
+
+Result: **zero processing errors** across the entire run. A 20-campaign
+random sample mid-test showed Pinecone's `status` metadata matching
+Postgres exactly in every case. Final state: Postgres and Pinecone's `ads`
+namespace both landed back at exactly 288 records (the original catalog),
+no orphans, no drift.
+
+Per-action latency, now with real sample sizes:
+
+| action | n | avg | p50 | p90 | p99 |
+| --- | --- | --- | --- | --- | --- |
+| `metadata_updated` | 319 | 0.427s | 0.359s | 0.421s | 0.491s |
+| `deleted` | 26 | 0.348s | 0.334s | 0.390s | 0.433s |
+| `reembedded` | 326 | 0.942s | 0.934s | 1.104s | 1.270s |
+
+Compared directly against the pre-fix numbers in the table above
+(`metadata_updated` 1.033s avg, `deleted` 1.025s avg, `reembedded` 1.708s
+avg): the `get_index()` caching fix delivers a consistent **~2.4-2.9x
+speedup on non-embedding writes** and **~1.8x on re-embeds** (a smaller
+multiple there since the ~0.6-0.7s OpenAI call is a fixed cost the fix
+doesn't touch), holding steady across a sustained run of hundreds of
+consecutive calls -- p99 stays close to the mean in all three cases, no
+sign of degradation, rate-limiting, or connection exhaustion under load.
+
 Not yet committed to git (this Phase 2 slice) -- pending user go-ahead,
 same as Phase 0/1 was before it.
