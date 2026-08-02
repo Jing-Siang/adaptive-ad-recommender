@@ -19,7 +19,7 @@ help:
 	@echo ""
 	@echo "  make kafka                     Start Kafka + Debezium Connect (opt-in, see docs/kafka_cdc_plan.md)"
 	@echo "  make kafka-down                 Stop Kafka + Connect"
-	@echo "  make kafka-register-connector   Create the compacted topic + register the Debezium connector (safe to re-run)"
+	@echo "  make kafka-register-connector   Create the compacted topic + DLQ topic, register the Debezium connector (safe to re-run)"
 	@echo "  make kafka-consumer             Run the Pinecone campaign sync consumer -- keep running in its own terminal"
 	@echo ""
 	@echo "Typical flow: make infra, then make backend / make worker / make frontend in three terminals."
@@ -77,6 +77,11 @@ kafka-register-connector:
 		--topic ad_recommender.public.campaigns \
 		--partitions 1 --replication-factor 1 \
 		--config cleanup.policy=compact
+	docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+		--bootstrap-server kafka:9092 \
+		--create --if-not-exists \
+		--topic ad_recommender.public.campaigns.dlq \
+		--partitions 1 --replication-factor 1
 	@code=$$(curl -s -o /tmp/connector-response.json -w "%{http_code}" \
 		-X POST -H "Content-Type: application/json" \
 		--data @kafka/connectors/campaigns-connector.json \

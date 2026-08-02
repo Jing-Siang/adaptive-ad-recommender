@@ -253,14 +253,27 @@ just a visible new local-dev requirement.
       this existed). Live-verified: logged `lag: 109 -> 62 -> 0` while a
       real backlog drained, then kept logging `lag: 0` every ~30s during
       a genuinely idle period afterward.
-- [ ] Dead-letter handling for malformed events / transient Pinecone
-      failures: Kafka has no built-in "skip just this one message, keep
-      the rest flowing" primitive the way SQS/RabbitMQ dead-lettering
-      does -- a partition is strictly ordered, and not committing past a
-      bad message blocks everything behind it in that partition too. Catch
-      the error, publish the raw bad message to a separate dead-letter
-      topic, then commit past it -- don't just let a bad message wedge the
-      whole sync.
+- [x] **Dead-letter topic** (2026-08-02) -- new topic
+      `ad_recommender.public.campaigns.dlq` (default delete-based
+      retention, deliberately *not* compacted like the main topic, since a
+      DLQ needs to retain every failure for a while, not just latest-per-key),
+      pre-created via `make kafka-register-connector` alongside the main
+      topic. On a processing exception, `_send_to_dead_letter()` produces
+      the raw original message (key, value, offset, partition, error
+      type/message, timestamp) to this topic and blocks on `flush()`
+      *before* the original message gets committed -- so if the DLQ write
+      itself ever failed, the original is simply retried next poll instead
+      of being lost with no trace anywhere. Still a "pragmatic stopgap,"
+      not full SQS/RabbitMQ-grade dead-lettering -- inspecting/replaying
+      the DLQ topic is a manual `kafka-console-consumer.sh` job, no
+      automatic reprocessing tooling built. Live-verified: published one
+      deliberately-invalid (non-JSON) message via
+      `kafka-console-producer.sh` with a distinctive test key --
+      `pinecone_sync_consumer_processing_error` was logged
+      (`JSONDecodeError`), the exact original content showed up correctly
+      in the DLQ topic, and a real follow-up event right after it was
+      processed normally, confirming the bad message didn't wedge the
+      partition.
 
 ## Phase 6 -- testing
 
@@ -468,14 +481,13 @@ negligible. `retrieve_candidates` now fetches exactly `top_k` from
 Pinecone; an occasional short batch is an accepted, harmless outcome for
 a scrolling feed, not something to over-fetch against on every call.
 
-**Phase 5, first half done (2026-08-02)**: consumer-group lag self-logging
-(30s heartbeat, also serves as a liveness signal), live-verified --
-logged `lag: 109 -> 62 -> 0` while a real backlog drained, then kept
-logging `lag: 0` every ~30s during a genuinely idle period afterward.
-`handle_event`'s decision logic is unchanged; this only touched `run()`'s
-surrounding loop. Full non-LLM test suite (68 tests) still passes.
-Dead-letter handling (the other Phase 5 item) is a separate follow-up
-commit.
+**Phase 5 done (2026-08-02)**: consumer-group lag self-logging (30s
+heartbeat, also serves as a liveness signal) and dead-letter handling
+(failed messages preserved in `ad_recommender.public.campaigns.dlq`
+before being committed past, not just logged and discarded). Both
+live-verified -- see Phase 5 above for full detail. `handle_event`'s
+decision logic is unchanged; this only touched `run()`'s surrounding
+loop. Full non-LLM test suite (68 tests) still passes.
 
 Not yet committed to git (this Phase 2 slice) -- pending user go-ahead,
 same as Phase 0/1 was before it.

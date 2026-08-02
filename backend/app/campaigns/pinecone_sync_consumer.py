@@ -10,7 +10,7 @@ tradeoffs)."""
 import json
 import time
 
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, Producer
 
 from app.core.config import settings
 from app.core.embeddings import embed_ads
@@ -18,6 +18,7 @@ from app.core.logging_utils import log_event
 from app.core.vector_store import delete_vector, update_metadata, upsert_vector
 
 TOPIC = "ad_recommender.public.campaigns"
+DLQ_TOPIC = "ad_recommender.public.campaigns.dlq"
 GROUP_ID = "pinecone-campaign-sync"
 NAMESPACE = "ads"
 
@@ -117,6 +118,29 @@ def _log_lag(consumer: Consumer) -> None:
         log_event("pinecone_sync_consumer_lag", partition=tp.partition, lag=lag)
 
 
+def _send_to_dead_letter(producer: Producer, msg, exc: Exception) -> None:
+    """Preserve a message that failed processing before committing past it
+    -- flushed (blocking) so the original is never lost: if this write
+    itself fails, the exception propagates, the original message is not
+    committed, and it's simply retried on the next poll instead of
+    vanishing with no trace anywhere. Pragmatic stopgap, not full
+    SQS/RabbitMQ-grade dead-lettering (see docs/kafka_cdc_plan.md Phase 5)
+    -- inspecting/replaying this topic is a manual operation, not built."""
+    dlq_record = json.dumps(
+        {
+            "offset": msg.offset(),
+            "partition": msg.partition(),
+            "key": msg.key().decode() if msg.key() else None,
+            "value": msg.value().decode() if msg.value() else None,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "failed_at": time.time(),
+        }
+    ).encode()
+    producer.produce(DLQ_TOPIC, key=msg.key(), value=dlq_record)
+    producer.flush(timeout=10)
+
+
 def run() -> None:
     consumer = Consumer(
         {
@@ -126,6 +150,7 @@ def run() -> None:
             "enable.auto.commit": False,
         }
     )
+    producer = Producer({"bootstrap.servers": settings.kafka_bootstrap_servers})
     consumer.subscribe([TOPIC])
     log_event("pinecone_sync_consumer_started", topic=TOPIC, group_id=GROUP_ID)
     last_lag_log = 0.0
@@ -152,9 +177,7 @@ def run() -> None:
                 row = payload.get("after") or payload.get("before") or {}
                 log_event("pinecone_sync_event", action=action, campaign_id=row.get("id"), op=payload["op"])
             except Exception as exc:
-                # Pragmatic stopgap, not full dead-letter handling (see
-                # docs/kafka_cdc_plan.md Phase 5) -- log, skip, and commit
-                # past it rather than block the partition on one bad message.
+                _send_to_dead_letter(producer, msg, exc)
                 log_event(
                     "pinecone_sync_consumer_processing_error",
                     offset=msg.offset(),
