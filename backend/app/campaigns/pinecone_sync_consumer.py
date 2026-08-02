@@ -8,6 +8,7 @@ actually become servable (see docs/kafka_cdc_plan.md for the lag/ordering
 tradeoffs)."""
 
 import json
+import time
 
 from confluent_kafka import Consumer
 
@@ -19,6 +20,11 @@ from app.core.vector_store import delete_vector, update_metadata, upsert_vector
 TOPIC = "ad_recommender.public.campaigns"
 GROUP_ID = "pinecone-campaign-sync"
 NAMESPACE = "ads"
+
+# How often to log this consumer's own lag, whether or not messages are
+# currently arriving -- poll(1.0) already loops roughly once/second when
+# idle, so this doubles as a liveness heartbeat, not just a backlog signal.
+_LAG_LOG_INTERVAL_SECONDS = 30
 
 # The only fields baked into the embedded text (see campaigns/indexing.py) --
 # a change to any other field never needs a fresh embedding.
@@ -97,6 +103,20 @@ def handle_event(payload: dict) -> str:
     return "metadata_updated"
 
 
+def _log_lag(consumer: Consumer) -> None:
+    """Self-reported lag, logged on a timer regardless of whether messages
+    are currently arriving -- also serves as a liveness heartbeat during
+    quiet periods, not just a backlog signal."""
+    for tp in consumer.assignment():
+        low, high = consumer.get_watermark_offsets(tp, cached=False)
+        position = consumer.position([tp])[0].offset
+        # position is -1 (OFFSET_INVALID) if nothing's been consumed yet
+        # this session -- treat that as "lag = the whole visible topic"
+        # rather than logging a garbage negative number.
+        lag = high - (position if position >= 0 else low)
+        log_event("pinecone_sync_consumer_lag", partition=tp.partition, lag=lag)
+
+
 def run() -> None:
     consumer = Consumer(
         {
@@ -108,9 +128,15 @@ def run() -> None:
     )
     consumer.subscribe([TOPIC])
     log_event("pinecone_sync_consumer_started", topic=TOPIC, group_id=GROUP_ID)
+    last_lag_log = 0.0
     try:
         while True:
             msg = consumer.poll(1.0)
+
+            if time.time() - last_lag_log > _LAG_LOG_INTERVAL_SECONDS:
+                _log_lag(consumer)
+                last_lag_log = time.time()
+
             if msg is None:
                 continue
             if msg.error():

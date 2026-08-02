@@ -241,8 +241,18 @@ just a visible new local-dev requirement.
 
 ## Phase 5 -- operational basics
 
-- [ ] Log/monitor Kafka consumer-group lag (cheap, standard "is the sync
-      keeping up" signal).
+- [x] **Consumer-group lag logging** (2026-08-02) -- `pinecone_sync_consumer.py`
+      self-reports its own lag every 30s (`_LAG_LOG_INTERVAL_SECONDS`) via
+      `_log_lag()`, computed directly from confluent-kafka's
+      `get_watermark_offsets()`/`position()` APIs, no external script or
+      monitoring stack needed. Fires on a wall-clock timer independent of
+      whether messages are arriving, so it doubles as a liveness heartbeat
+      during quiet periods, not just a backlog signal -- exactly the
+      "is the sync keeping up" gap that caused real confusion earlier in
+      this project (mistook a draining backlog for a bug, twice, before
+      this existed). Live-verified: logged `lag: 109 -> 62 -> 0` while a
+      real backlog drained, then kept logging `lag: 0` every ~30s during
+      a genuinely idle period afterward.
 - [ ] Dead-letter handling for malformed events / transient Pinecone
       failures: Kafka has no built-in "skip just this one message, keep
       the rest flowing" primitive the way SQS/RabbitMQ dead-lettering
@@ -457,6 +467,15 @@ before a corrected, realistic test showed the actual risk to be
 negligible. `retrieve_candidates` now fetches exactly `top_k` from
 Pinecone; an occasional short batch is an accepted, harmless outcome for
 a scrolling feed, not something to over-fetch against on every call.
+
+**Phase 5, first half done (2026-08-02)**: consumer-group lag self-logging
+(30s heartbeat, also serves as a liveness signal), live-verified --
+logged `lag: 109 -> 62 -> 0` while a real backlog drained, then kept
+logging `lag: 0` every ~30s during a genuinely idle period afterward.
+`handle_event`'s decision logic is unchanged; this only touched `run()`'s
+surrounding loop. Full non-LLM test suite (68 tests) still passes.
+Dead-letter handling (the other Phase 5 item) is a separate follow-up
+commit.
 
 Not yet committed to git (this Phase 2 slice) -- pending user go-ahead,
 same as Phase 0/1 was before it.
