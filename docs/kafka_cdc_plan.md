@@ -277,12 +277,50 @@ just a visible new local-dev requirement.
 
 ## Phase 6 -- testing
 
-- [ ] Unit test the consumer's event-parsing + eligibility-decision
-      function in isolation (pure function, easy with a fake Debezium
-      payload).
-- [ ] One integration test: run the full local stack, trigger a budget-
-      exhaustion via the real API, assert the Pinecone vector for that
-      campaign disappears within a few seconds.
+- [x] **Unit tests** (2026-08-02) -- `backend/tests/test_pinecone_sync_consumer.py`,
+      15 tests covering every branch of `handle_event`'s decision table
+      plus `_needs_reembed` directly, all mocked (no network at all --
+      verified by running with every docker service stopped). Includes
+      tests that specifically prove properties only asserted by comment
+      before now: an irrelevant field change never triggers an OpenAI
+      call, and a campaign leaving `active` is never deleted (only
+      `op:"d"` deletes).
+- [x] **Integration test** (2026-08-02) --
+      `backend/tests/test_pinecone_sync_consumer_integration.py`. Corrects
+      this bullet's original wording: the vector *updates* (its `status`
+      metadata), it doesn't *disappear* -- that framing predated the
+      Phase 2 decision to never delete for eligibility reasons. Seeds a
+      real campaign + Pinecone vector, runs the actual consumer as a
+      subprocess, triggers a real budget exhaustion via
+      `POST /events/reaction`, and polls Pinecone for the status update.
+      Two real issues found and fixed while getting this test working live
+      (both now fixed in the test, not the production code):
+      - **Pinecone read-after-write lag** (already a documented project
+        gotcha, re-encountered here): the reaction endpoint's own
+        `fetch_vector` call raced the `index_campaign()` upsert moments
+        earlier. Fixed by polling for read-back success before triggering
+        the reaction.
+      - **Unrelated consumer-group backlog**: `pinecone-campaign-sync` is
+        a persistent group: by the time this test ran, ~400 messages of
+        unrelated backlog from earlier manual testing this session were
+        sitting in front of it, making the test's runtime depend on
+        arbitrary history instead of the thing being tested. Fixed by
+        seeking the group's committed offset to the topic's current end
+        immediately before starting the consumer subprocess, so it only
+        ever sees this test's own event.
+      Marked `@pytest.mark.integration`, excluded from `make test` (new
+      `integration` marker registered in `pyproject.toml`), run via the
+      new `make test-integration`. Verified passing twice in a row
+      (repeatability) plus a full `make test` regression pass (91 passed,
+      1 deselected).
+- [x] **Side finding, unrelated to this phase's actual work**: the ad hoc
+      `-k "not test_policy_review and not test_ranking"` filtering used
+      throughout this session (to avoid assumed OpenAI cost) was checked
+      against the actual test files and found to be unnecessary -- both
+      are fully mocked already, no real API calls. `make test` now runs
+      them normally; the `integration` marker is the only real exclusion
+      needed, and it's for an actual reason (needs live Kafka/Connect),
+      not a guess.
 
 ## Status
 
@@ -488,6 +526,17 @@ before being committed past, not just logged and discarded). Both
 live-verified -- see Phase 5 above for full detail. `handle_event`'s
 decision logic is unchanged; this only touched `run()`'s surrounding
 loop. Full non-LLM test suite (68 tests) still passes.
+
+**Phase 6 done (2026-08-02) -- this completes all 6 phases of the plan.**
+15 unit tests (fully mocked, zero network) plus one real end-to-end
+integration test (live Kafka/Connect/Postgres/Pinecone/OpenAI), both
+passing, integration test verified repeatable across two consecutive
+runs. See Phase 6 above for the two real bugs found and fixed while
+getting the integration test working (Pinecone read-after-write racing
+the test's own setup, and unrelated consumer-group backlog making runtime
+depend on arbitrary history) -- both are exactly the kind of thing this
+project has run into live throughout, caught here by an automated test
+for the first time instead of manual live debugging.
 
 Not yet committed to git (this Phase 2 slice) -- pending user go-ahead,
 same as Phase 0/1 was before it.
