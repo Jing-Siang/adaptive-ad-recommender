@@ -17,11 +17,12 @@ See [`docs/spec.md`](docs/spec.md) for the full design.
 | Vector store | Pinecone (serverless) |
 | Relational store | Postgres + SQLAlchemy + Alembic |
 | Async job queue | Redis + RQ |
+| Change data capture | Kafka (KRaft) + Debezium — syncs campaign eligibility (status/budget/dates) from Postgres into Pinecone, see [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md) |
 | Agent framework | LangChain + MCP (`langchain-mcp-adapters`) |
 | Backend | FastAPI |
 | Frontend | React + Vite + TypeScript, Tailwind CSS, react-router-dom |
 | Reliability | `tenacity`, Pydantic, atomic SQL budget updates |
-| Testing | `pytest` (74 tests) |
+| Testing | `pytest` (92 tests, 1 integration test run separately) |
 | Deployment | Docker Compose locally → Railway/Render for production |
 
 ## Repo layout
@@ -32,7 +33,8 @@ adaptive-ad-recommender/
 │   ├── app/
 │   │   ├── core/       # shared infra: config, db, queue, embeddings, vector_store
 │   │   ├── serving/    # users -> retrieve -> rerank -> guardrail -> serve -> events
-│   │   └── campaigns/  # advertiser submits -> policy review -> moderation
+│   │   └── campaigns/  # advertiser submits -> policy review -> moderation;
+│   │                   #   pinecone_sync_consumer.py syncs Pinecone via Kafka CDC
 │   ├── mcp_servers/    # ad-policy MCP resource server
 │   ├── alembic/        # DB migrations
 │   ├── data/            # synthetic personas + versioned seed campaign catalog
@@ -44,8 +46,11 @@ adaptive-ad-recommender/
 │       ├── components/    # Feed, FeedCard, OnboardingChat, ReactionButtons, CtrTrendChart, …
 │       ├── api.ts         # fetch functions for every backend endpoint
 │       └── types.ts       # TS interfaces mirroring the backend's Pydantic schemas
+├── kafka/
+│   └── connectors/      # Debezium Postgres connector registration JSON
 ├── docs/
-│   └── spec.md
+│   ├── spec.md
+│   └── kafka_cdc_plan.md   # Postgres -> Pinecone CDC sync design + phase-by-phase log
 └── docker-compose.yml
 ```
 
@@ -102,7 +107,25 @@ The API runs at `http://localhost:8000` (interactive docs at `/docs`). The
 worker is required — campaign review is async; without it, submitted
 campaigns sit at `status=pending_review` forever.
 
-### 4. Try it
+### 4. Start Kafka + the Pinecone sync consumer (opt-in, but needed for approvals to actually serve)
+
+```bash
+make kafka                     # equivalent to: docker compose up -d kafka connect
+make kafka-register-connector  # creates the compacted + DLQ topics, registers the Debezium connector (safe to re-run)
+
+# terminal 3
+make kafka-consumer
+# equivalent to: cd backend && source .venv/bin/activate && python -m app.campaigns.pinecone_sync_consumer
+```
+
+A campaign approval no longer indexes into Pinecone synchronously — it's
+picked up via Postgres change data capture (Debezium → Kafka) and applied
+by this consumer, usually within a couple of seconds. **Skip this step and
+an approved campaign will just never show up in recommendations, with
+nothing telling you why.** See [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md)
+for the full design.
+
+### 5. Try it
 
 ```bash
 # submit a campaign
@@ -126,8 +149,9 @@ curl -X POST localhost:8000/users -H 'Content-Type: application/json' -d '{
   "interest_summary": "need a plumber for a leaky faucet"
 }'
 
-# once the campaign's approved (poll GET /campaigns/{id} or check the worker's
-# logs), get a recommendation
+# once the campaign's approved AND kafka-consumer has processed it (poll
+# GET /campaigns/{id} for status=active, then check the consumer's own
+# logs or just wait a couple seconds), get a recommendation
 curl -X POST localhost:8000/recommend -H 'Content-Type: application/json' -d '{
   "user_id": "demo-user-1",
   "top_k": 5
@@ -169,12 +193,20 @@ curl -X POST localhost:8000/campaigns/<id>/moderate -H 'Content-Type: applicatio
 
 ```bash
 make test
-# equivalent to: cd backend && source .venv/bin/activate && pytest
+# equivalent to: cd backend && source .venv/bin/activate && pytest -m "not integration"
 ```
 
 Runs against the real dev Postgres (not SQLite — see `docs/spec.md` on why)
 and mocks OpenAI/Pinecone/MCP at their boundaries; needs `make infra` running
 first.
+
+One test is excluded from `make test`: a real, unmocked end-to-end test of
+the Kafka CDC sync (needs `make kafka` + `make kafka-register-connector`
+running, and costs a tiny real OpenAI call). Run it explicitly:
+
+```bash
+make test-integration
+```
 
 ### Frontend
 
@@ -204,14 +236,23 @@ make docker-up
 
 Starts postgres, redis, the backend, the worker, and the frontend together
 (still need to run `alembic upgrade head` and create the Pinecone index
-once, per above).
+once, per above). This also starts `kafka`/`connect` (they're regular
+services in the same `docker-compose.yml`), but **not**
+`pinecone_sync_consumer.py` — that's deliberately a native process, not a
+docker-compose service (see [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md)
+for why), so it still needs `make kafka-register-connector` +
+`make kafka-consumer` run separately even after `docker-up`.
 
 ## Status
 
-Backend: fully built, tested (74 tests), and verified working end-to-end
+Backend: fully built, tested (92 tests), and verified working end-to-end
 against real Postgres/Redis/Pinecone/OpenAI — campaign posting/review,
 ad serving/feedback, and the onboarding chat (see
 [`docs/next_phase_plan.md`](docs/next_phase_plan.md) for design details).
+Campaign eligibility (status/budget/dates) syncs from Postgres into
+Pinecone via Kafka + Debezium CDC, not a synchronous write on approval —
+see [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md) for the full design,
+live verification results, and load-test data.
 
 Frontend: all four views built — onboarding chat + feed (View 1),
 performance dashboard (View 2), campaign submission (View 3), and the
