@@ -97,6 +97,15 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    # .env's DATABASE_URL/REDIS_URL use localhost, correct for the native
+    # `make backend`/`make worker` flow (localhost is host-mapped there)
+    # but wrong inside a container, where localhost means "this container
+    # itself," not the postgres/redis containers next to it -- override
+    # with the docker-network service names, same as the Debezium
+    # connector config already does for Postgres.
+    environment:
+      - DATABASE_URL=postgresql+psycopg://ad_recommender:ad_recommender@postgres:5432/ad_recommender
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./backend/app:/app/app
       - ./backend/data:/app/data
@@ -109,6 +118,8 @@ services:
     command: rq worker --url redis://redis:6379 campaign_review
     env_file:
       - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://ad_recommender:ad_recommender@postgres:5432/ad_recommender
     volumes:
       - ./backend/app:/app/app
     depends_on:
