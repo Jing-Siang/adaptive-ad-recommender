@@ -1,5 +1,5 @@
 .PHONY: help install install-backend install-frontend infra infra-down migrate \
-	backend worker frontend seed test docker-up docker-down \
+	backend worker frontend seed test test-integration docker-up docker-down \
 	kafka kafka-down kafka-register-connector kafka-consumer
 
 help:
@@ -13,7 +13,8 @@ help:
 	@echo "  make worker         Run the RQ campaign-review worker -- keep running in its own terminal"
 	@echo "  make frontend       Run the Vite dev server -- keep running in its own terminal"
 	@echo "  make seed           Generate + seed the demo campaign catalog"
-	@echo "  make test           Run backend tests (needs infra running)"
+	@echo "  make test           Run backend tests (needs infra running, excludes the Kafka integration test)"
+	@echo "  make test-integration  Run the Kafka CDC integration test (needs infra + kafka + kafka-register-connector)"
 	@echo "  make docker-up      Run everything (postgres, redis, backend, worker, frontend) via Docker Compose"
 	@echo "  make docker-down    Stop the Docker Compose stack"
 	@echo ""
@@ -56,7 +57,10 @@ seed:
 	cd backend && . .venv/bin/activate && python -m scripts.generate_seed_campaign_data && python -m scripts.seed_demo_campaigns
 
 test:
-	cd backend && . .venv/bin/activate && pytest
+	cd backend && . .venv/bin/activate && pytest -m "not integration"
+
+test-integration:
+	cd backend && . .venv/bin/activate && pytest -m integration -v
 
 docker-up:
 	docker compose up --build
