@@ -41,6 +41,19 @@ submission, moderator queue).
 
 ## Push date-window eligibility into Pinecone's query filter
 
+**Done** (2026-08-01) -- superseded by `docs/kafka_cdc_plan.md`. The
+original framing below turned out to be only half right: `status` and
+`budget_spent` *did* end up moving into Pinecone too, not just
+`start_date`/`end_date` -- Kafka + Debezium CDC (`pinecone_sync_consumer.py`)
+syncs all of it from Postgres in near-real-time, which avoids the
+dual-write staleness bug this note originally worried about (Postgres
+stays the only thing anyone writes to directly; Pinecone converges from
+the CDC log, not from a second manual write). `_eligible_campaign_ids`'s
+Postgres check and the oversample factor both still exist as the safety
+net for the small residual sync lag -- see that doc for the full design,
+live verification, and load-test numbers. Original note, kept for
+history:
+
 `serving/retrieval.py`'s `_eligible_campaign_ids` checks three things against
 Postgres: `status == "active"`, `budget_spent < budget_total`, and the
 `start_date`/`end_date` window. The oversample factor (`_OVERSAMPLE_FACTOR`)
@@ -72,3 +85,45 @@ Not pursued now because the actual cost concern that prompted this
 discussion (2026-07-24) was already negligible either way -- Pinecone query
 cost doesn't meaningfully change with `top_k`, oversampled or not, at this
 catalog's scale.
+
+## Async/batched budget debits, if `campaigns.budget_spent` ever becomes a hot row
+
+Raised (2026-08-02) while designing the reaction-idempotency fix (see the
+`reactions` table work): does the per-reaction, synchronous
+`UPDATE campaigns SET budget_spent = budget_spent + delta` scale to "many
+many users"?
+
+Short answer: the per-user pieces (the `reactions` table, one row per
+`(user_id, campaign_id)`, and each user's own Pinecone profile vector) scale
+fine on their own -- different users touch different rows/keys, so there's
+no contention between them, and the standard horizontal-scaling playbook
+(more backend replicas, Postgres handles many independent indexed
+row-ops/sec, Pinecone already scales itself) covers "many many users"
+without needing anything new.
+
+The one real hot spot is `campaigns.budget_spent` itself: every user
+reacting to the *same* campaign contends for that *one* row. This is the
+same shape as "Instagram's like counter on a viral post" -- not a users
+problem, a single-hot-campaign problem, and only shows up if one campaign
+gets a very large burst of concurrent reactions. The current atomic
+`UPDATE ... SET x = x + delta` is already the right first-line answer (it's
+what you reach for before you need anything fancier), and comfortably
+handles far more load than this project will ever see -- not a real
+problem today, deliberately not building around it yet.
+
+If it ever became one, the industry pattern (this is genuinely how
+Instagram/Twitter-scale systems handle a hot counter) is to stop updating
+the shared row synchronously in the request path at all: publish a
+"reaction happened" event to a durable log (Kafka, in our case -- we
+already have the infra) instead, and have a separate consumer batch many
+events together over a short window and apply one combined increment,
+dramatically cutting how often that one row actually gets locked. At more
+extreme scale, the counter itself gets sharded into several sub-rows that
+absorb writes independently and get summed at read time, with the
+displayed number allowed to be slightly eventually-consistent -- the same
+trade this project already made for Postgres -> Pinecone sync. This would
+be architecturally very similar to the existing CDC consumer
+(`pinecone_sync_consumer.py`): same "Kafka absorbs the write, a consumer
+applies it asynchronously" shape, just aimed at a different hot spot.
+Not scheduled -- there's no evidence this project needs it, and building
+it now would be solving a scaling problem that doesn't exist yet.
