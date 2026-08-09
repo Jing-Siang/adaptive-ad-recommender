@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Index, String, func
+from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -86,5 +86,29 @@ class Event(Base):
     report_category: Mapped[str | None] = mapped_column(String(50), default=None)
     report_reason: Mapped[str | None] = mapped_column(String(500), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    campaign: Mapped["Campaign"] = relationship()
+
+
+class Reaction(Base):
+    """The user's *current* reaction to an ad -- one row per (user_id,
+    campaign_id), updated in place on switch/re-click. Separate from Event
+    (the append-only history the dashboard counts) on purpose: this table
+    answers "what does this user currently think of this ad", which is a
+    current-state question, not a log query. Also the natural seam for a
+    future accounts feature -- only user_id's type/constraint would need to
+    change, this table's shape stays the same."""
+
+    __tablename__ = "reactions"
+    __table_args__ = (UniqueConstraint("user_id", "campaign_id", name="uq_reactions_user_campaign"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(200))
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
+    reaction: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     campaign: Mapped["Campaign"] = relationship()
