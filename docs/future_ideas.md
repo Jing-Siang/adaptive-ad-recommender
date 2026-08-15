@@ -127,3 +127,93 @@ be architecturally very similar to the existing CDC consumer
 applies it asynchronously" shape, just aimed at a different hot spot.
 Not scheduled -- there's no evidence this project needs it, and building
 it now would be solving a scaling problem that doesn't exist yet.
+
+**Redis vs. Kafka for this, and why they'd likely end up combined
+(2026-08-12).** Redis's `INCRBYFLOAT` is also a real, standard pattern for
+exactly this kind of pre-aggregation buffer -- picking Kafka above wasn't
+"Redis loses," it's two tools that are actually good at opposite halves of
+the problem:
+
+- *Durability*: Redis holds the counter in memory; even with persistence
+  turned on (RDB snapshots, or AOF with `appendfsync everysec`), a crash at
+  the wrong moment can lose the last fraction of a second's writes --
+  for a budget counter, that's a reaction that happened but never gets
+  counted, silently. Kafka is built specifically not to do this: a producer
+  can require its write be durably persisted (and replicated, with >1
+  broker) before it's acknowledged, and a crashed consumer just resumes
+  from its last committed offset and reprocesses -- nothing before that
+  point can vanish. For something tracking money, this matters more than
+  which one happens to already be running.
+- *Live reads*: the flip side favors Redis. If eligibility needs to check
+  "budget spent so far, including whatever hasn't been flushed to Postgres
+  yet," Redis's `GET` answers instantly by design. Kafka has no equivalent
+  -- there's no cheap way to "peek" at how much is sitting unconsumed in a
+  topic for one specific campaign without actually consuming it, which is
+  awkward for a per-request live check.
+
+So a real system wanting both durability and fast reads would likely run
+them together: Kafka as the durable source of truth for "this reaction
+happened," with a Redis counter layered on top purely as a disposable,
+fast read-cache of the current pending total -- rebuildable at any time by
+replaying the Kafka log if Redis ever lost it. That's the same "one
+durable source of truth, one derived fast-access layer" shape as
+Postgres+Pinecone elsewhere in this project, just with Kafka playing the
+source-of-truth role instead of Postgres. Still not scheduled, same
+reasoning as above -- this is the refined shape of the idea, not new
+urgency to build it.
+
+## Profile-vector nudge has an unprotected read-then-write race
+
+**Fixed (2026-08-16)** -- `record_feedback()` now holds a session-level
+Postgres advisory lock (`pg_advisory_lock(hashtext(user_id))`) around the
+profile-vector fetch and write, so a second concurrent reaction from the
+same user can't fetch the same stale vector before the first one's write
+lands. Verified with a real two-thread test
+(`test_record_feedback_serializes_profile_vector_updates_for_same_user`)
+that fails without the lock and passes with it -- confirmed by temporarily
+removing the lock and watching the test catch the exact race. Original
+note, kept for history:
+
+Found (2026-08-12) while discussing request-volume scaling, separate from
+the reaction-idempotency fix (`reactions` table, atomic upsert). That fix
+protects the *reaction* row for a given `(user_id, campaign_id)`. It does
+nothing for the *profile vector* itself, which `record_feedback()`
+(`app/serving/feedback.py`) still updates as three unguarded steps:
+
+```python
+profile_vector = fetch_vector(user_id, namespace="users")   # read
+new_vector = update_profile_vector(profile_vector, ad_vector, rate_delta)
+update_vector(user_id, new_vector, namespace="users")        # write
+```
+
+If the same user has two reactions genuinely in flight at once (e.g.
+reacting to ad A then ad B within the same round-trip window), both
+requests can fetch the same starting vector before either writes back --
+whichever `update_vector()` lands last wins outright, silently overwriting
+the other's nudge. Not a cross-user problem (different users' vectors
+never contend, see below); this is the same user racing against
+themselves.
+
+Why it can't be fixed the same way as the `reactions` table: Postgres has
+a real atomic primitive for "read the old value and write the new one as
+one indivisible step" (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING`).
+Pinecone has no equivalent -- `update_vector()` just overwrites `values`
+wholesale with whatever's passed in, so there's no server-side "nudge this
+vector by X, atomically" operation to reach for. A real fix would need
+application-level coordination (e.g. a lock per `user_id` serializing
+concurrent profile updates for that user), which is new machinery, not a
+one-line change.
+
+Lower severity than the budget race that motivated the `reactions` table
+work: nothing financial is at risk, and it's self-correcting -- a lost
+nudge just means that one reaction's signal doesn't make it into the
+profile this round, not a compounding error. Not pursued now for that
+reason; documenting so it isn't mistaken for "already handled" just
+because the reaction-row race got fixed.
+
+**Aside, why this doesn't apply across users:** `fetch_vector`/
+`update_vector` are keyed by `user_id` -- each user has their own vector,
+so this is a one-to-one relationship, unlike `campaigns.budget_spent`
+(many users, one shared row). A huge burst of concurrent reactions across
+*different* users causes no contention here at all; the race above only
+ever involves one user's own overlapping requests.
