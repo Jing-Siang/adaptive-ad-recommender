@@ -35,6 +35,14 @@ _UPSERT_REACTION_SQL = text(
     """
 )
 
+# Session-level (not transaction-scoped) advisory lock keyed on user_id --
+# guards the profile-vector fetch+write below, which Pinecone has no atomic
+# primitive for (unlike the reaction upsert above). Session-level so the
+# reaction-upsert's own db.commit() in between doesn't release it early;
+# always released in record_feedback's `finally`, not tied to commit/rollback.
+_ADVISORY_LOCK_SQL = text("SELECT pg_advisory_lock(hashtext(:user_id))")
+_ADVISORY_UNLOCK_SQL = text("SELECT pg_advisory_unlock(hashtext(:user_id))")
+
 
 def update_profile_vector(
     profile_vector: list[float],
@@ -100,30 +108,40 @@ def record_feedback(db: Session, user_id: str, ad_id: str, outcome: str) -> list
     Requires a profile to already exist -- a reaction only ever fires on an ad
     that was actually served, which itself requires a profile (see
     retrieve_candidates), so a missing one here means the same kind of bug,
-    not a legitimate case to paper over."""
+    not a legitimate case to paper over.
+
+    Holds an advisory lock on user_id from before the profile-vector fetch
+    through its write: without it, two genuinely concurrent reactions from
+    the same user (e.g. reacting to two different ads back to back) could
+    both fetch the same starting vector and the second write would silently
+    clobber the first's nudge (see docs/future_ideas.md)."""
     campaign_id = int(ad_id)
 
     ad_vector = fetch_vector(ad_id, namespace="ads")
     if ad_vector is None:
         raise ValueError(f"ad '{ad_id}' not found")
 
-    profile_vector = fetch_vector(user_id, namespace="users")
-    if profile_vector is None:
-        raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
+    db.execute(_ADVISORY_LOCK_SQL, {"user_id": user_id})
+    try:
+        profile_vector = fetch_vector(user_id, namespace="users")
+        if profile_vector is None:
+            raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
 
-    row = db.execute(
-        _UPSERT_REACTION_SQL,
-        {"user_id": user_id, "campaign_id": campaign_id, "new_reaction": outcome},
-    ).one()
-    db.commit()
-    old_outcome = row.old_reaction
+        row = db.execute(
+            _UPSERT_REACTION_SQL,
+            {"user_id": user_id, "campaign_id": campaign_id, "new_reaction": outcome},
+        ).one()
+        db.commit()
+        old_outcome = row.old_reaction
 
-    if old_outcome == outcome:
-        return profile_vector
+        if old_outcome == outcome:
+            return profile_vector
 
-    rate_delta = LEARNING_RATE.get(outcome, 0.0) - LEARNING_RATE.get(old_outcome, 0.0)
-    new_vector = update_profile_vector(profile_vector, ad_vector, rate_delta)
-    update_vector(user_id, new_vector, namespace="users")
+        rate_delta = LEARNING_RATE.get(outcome, 0.0) - LEARNING_RATE.get(old_outcome, 0.0)
+        new_vector = update_profile_vector(profile_vector, ad_vector, rate_delta)
+        update_vector(user_id, new_vector, namespace="users")
+    finally:
+        db.execute(_ADVISORY_UNLOCK_SQL, {"user_id": user_id})
 
     cost_delta = COST_PER_OUTCOME.get(outcome, 0.0) - COST_PER_OUTCOME.get(old_outcome, 0.0)
     _debit_campaign_budget(db, campaign_id, cost_delta)

@@ -1,10 +1,14 @@
+import threading
+import time
+from datetime import date
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 from sqlalchemy import delete
 
-from app.models import Reaction
+from app.core.db import SessionLocal
+from app.models import Campaign, Reaction
 from app.serving.feedback import COST_PER_OUTCOME, LEARNING_RATE, _debit_campaign_budget, record_feedback, update_profile_vector
 
 UNIT_PROFILE = [1.0, 0.0, 0.0]
@@ -231,3 +235,81 @@ def test_record_feedback_raises_when_ad_not_found(mock_fetch, mock_update, db):
         record_feedback(db, "pytest-user", "999999999", "like")
 
     mock_update.assert_not_called()
+
+
+@patch("app.serving.feedback.update_vector")
+@patch("app.serving.feedback.fetch_vector")
+def test_record_feedback_serializes_profile_vector_updates_for_same_user(mock_fetch, mock_update, db, campaign, advertiser):
+    """Two genuinely concurrent reactions from the same user (different ads,
+    separate DB connections/threads) must not both fetch the profile vector
+    before either writes back -- that's the race documented in
+    docs/future_ideas.md. Asserts real mutual exclusion via a Postgres
+    advisory lock, not just that the code runs without error."""
+    campaign_b = Campaign(
+        advertiser_id=advertiser.id,
+        headline="Second campaign for concurrency test",
+        description="pytest",
+        category="hardware",
+        objective="conversions",
+        budget_total=10.0,
+        budget_spent=0.0,
+        start_date=date(2020, 1, 1),
+        end_date=date(2099, 1, 1),
+        excluded_categories=[],
+        status="active",
+    )
+    db.add(campaign_b)
+    db.commit()
+    db.refresh(campaign_b)
+
+    events: list[tuple[str, int]] = []
+    events_lock = threading.Lock()
+
+    def fetch_side_effect(vector_id, namespace):
+        if namespace == "users":
+            with events_lock:
+                events.append(("fetch_start", threading.get_ident()))
+            time.sleep(0.05)  # widen the window -- would expose the race without the lock
+        return UNIT_AD if namespace == "ads" else UNIT_PROFILE
+
+    def update_side_effect(vector_id, values, namespace):
+        with events_lock:
+            events.append(("write", threading.get_ident()))
+
+    mock_fetch.side_effect = fetch_side_effect
+    mock_update.side_effect = update_side_effect
+
+    def worker(ad_id: int, outcome: str) -> None:
+        session = SessionLocal()
+        try:
+            record_feedback(session, "pytest-concurrent-user", str(ad_id), outcome)
+        finally:
+            session.close()
+
+    t1 = threading.Thread(target=worker, args=(campaign.id, "like"))
+    t2 = threading.Thread(target=worker, args=(campaign_b.id, "interested"))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert len(events) == 4, f"expected 2 fetch_start + 2 write events, got {events}"
+
+    # Mutual exclusion: no thread's fetch_start may occur while another
+    # thread's fetch->write window is still open.
+    open_thread = None
+    for event_type, tid in events:
+        if event_type == "fetch_start":
+            assert open_thread is None, (
+                "a second thread fetched the profile vector while another thread's "
+                f"fetch->write window was still open -- events were {events}"
+            )
+            open_thread = tid
+        else:
+            assert open_thread == tid
+            open_thread = None
+
+    _clear_reaction(db, "pytest-concurrent-user", campaign.id)
+    _clear_reaction(db, "pytest-concurrent-user", campaign_b.id)
+    db.delete(campaign_b)
+    db.commit()
