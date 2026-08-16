@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import Date, cast, func
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_role
 from app.core.db import get_db
 from app.models import Campaign, Event
-from app.schemas import CampaignPerformance, PerformanceResponse, PerformanceTotals, PerformanceTrendPoint
+from app.schemas import CampaignPerformance, CurrentUser, PerformanceResponse, PerformanceTotals, PerformanceTrendPoint
 
 router = APIRouter(tags=["performance"])
 
@@ -16,7 +17,10 @@ def _rate(numerator: int, denominator: int) -> float:
 
 
 @router.get("/performance", response_model=PerformanceResponse)
-def get_performance(db: Session = Depends(get_db)) -> PerformanceResponse:
+def get_performance(
+    db: Session = Depends(get_db),
+    _current: CurrentUser = Depends(require_role("advertiser", "moderator")),
+) -> PerformanceResponse:
     """Aggregate CTR/engagement/dislike-rate/spend/CPA across all activity,
     plus a daily trend line and a per-campaign breakdown -- everything reads
     straight from the events table (the real history) and Campaign.budget_spent

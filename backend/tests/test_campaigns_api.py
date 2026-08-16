@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import Advertiser, Campaign
+from tests.conftest import auth_header
 
 client = TestClient(app)
 
@@ -32,8 +33,12 @@ def _cleanup(db, campaign_ids: list[int], advertiser_name: str) -> None:
 
 
 @patch("app.campaigns.api.campaign_review_queue")
-def test_create_campaign_returns_pending_review_and_enqueues_job(mock_queue, db):
-    resp = client.post("/campaigns", json={**_BASE_PAYLOAD, "advertiser_name": "pytest Advertiser A"})
+def test_create_campaign_returns_pending_review_and_enqueues_job(mock_queue, db, advertiser_user):
+    resp = client.post(
+        "/campaigns",
+        json={**_BASE_PAYLOAD, "advertiser_name": "pytest Advertiser A"},
+        headers=auth_header(advertiser_user),
+    )
 
     try:
         assert resp.status_code == 201
@@ -49,10 +54,11 @@ def test_create_campaign_returns_pending_review_and_enqueues_job(mock_queue, db)
 
 
 @patch("app.campaigns.api.campaign_review_queue")
-def test_create_campaign_reuses_existing_advertiser_by_name(mock_queue, db):
+def test_create_campaign_reuses_existing_advertiser_by_name(mock_queue, db, advertiser_user):
     payload = {**_BASE_PAYLOAD, "advertiser_name": "pytest Advertiser B"}
-    resp1 = client.post("/campaigns", json=payload)
-    resp2 = client.post("/campaigns", json={**payload, "headline": "second campaign"})
+    headers = auth_header(advertiser_user)
+    resp1 = client.post("/campaigns", json=payload, headers=headers)
+    resp2 = client.post("/campaigns", json={**payload, "headline": "second campaign"}, headers=headers)
 
     try:
         assert resp1.json()["advertiser_id"] == resp2.json()["advertiser_id"]
@@ -83,13 +89,14 @@ def test_list_campaigns_filters_by_status(db, campaign):
     assert campaign.id not in [c["id"] for c in resp_other.json()]
 
 
-def test_moderate_campaign_approve_activates(db, campaign):
+def test_moderate_campaign_approve_activates(db, campaign, moderator_user):
     campaign.status = "needs_review"
     db.commit()
 
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
         json={"outcome": "approved", "reason": "looks fine to a human", "reviewed_by": "pytest-moderator"},
+        headers=auth_header(moderator_user),
     )
 
     assert resp.status_code == 200
@@ -99,31 +106,57 @@ def test_moderate_campaign_approve_activates(db, campaign):
     assert data["review_reason"] == "looks fine to a human"
 
 
-def test_moderate_campaign_reject_sets_status(db, campaign):
+def test_moderate_campaign_reject_sets_status(db, campaign, moderator_user):
     campaign.status = "needs_review"
     db.commit()
 
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
         json={"outcome": "rejected", "reason": "violates policy", "reviewed_by": "pytest-moderator"},
+        headers=auth_header(moderator_user),
     )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "rejected"
 
 
-def test_moderate_campaign_wrong_status_returns_409(db, campaign):
+def test_moderate_campaign_wrong_status_returns_409(db, campaign, moderator_user):
     # campaign fixture defaults to status="active", not needs_review
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
         json={"outcome": "approved", "reason": "x", "reviewed_by": "pytest-moderator"},
+        headers=auth_header(moderator_user),
     )
     assert resp.status_code == 409
 
 
-def test_moderate_campaign_not_found_returns_404():
+def test_moderate_campaign_not_found_returns_404(moderator_user):
     resp = client.post(
         "/campaigns/999999999/moderate",
         json={"outcome": "approved", "reason": "x", "reviewed_by": "pytest-moderator"},
+        headers=auth_header(moderator_user),
     )
     assert resp.status_code == 404
+
+
+def test_create_campaign_rejects_end_user_role(user):
+    """The actual point of this whole phase -- an end_user (the default
+    role) cannot submit a campaign, and by the same mechanism could not
+    reach /moderate either (see test below)."""
+    resp = client.post("/campaigns", json=_BASE_PAYLOAD, headers=auth_header(user))
+    assert resp.status_code == 403
+
+
+def test_moderate_campaign_rejects_non_moderator_role(db, campaign, advertiser_user):
+    """The urgent gap this phase closes: previously anyone could moderate
+    any campaign. An advertiser (not a moderator) must be rejected too --
+    this isn't just "logged in", it's specifically role-gated."""
+    campaign.status = "needs_review"
+    db.commit()
+
+    resp = client.post(
+        f"/campaigns/{campaign.id}/moderate",
+        json={"outcome": "approved", "reason": "x", "reviewed_by": "x"},
+        headers=auth_header(advertiser_user),
+    )
+    assert resp.status_code == 403

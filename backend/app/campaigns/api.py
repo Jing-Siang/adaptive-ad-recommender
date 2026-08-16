@@ -3,12 +3,13 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_role
 from app.core.db import get_db
 from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
 from app.models import Advertiser, Campaign
 from app.core.queue import campaign_review_queue
-from app.schemas import CampaignCreateRequest, CampaignResponse, ModerationRequest
+from app.schemas import CampaignCreateRequest, CampaignResponse, CurrentUser, ModerationRequest
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -23,7 +24,11 @@ def _get_or_create_advertiser(db: Session, name: str) -> Advertiser:
 
 
 @router.post("", response_model=CampaignResponse, status_code=201)
-def create_campaign(request: CampaignCreateRequest, db: Session = Depends(get_db)) -> Campaign:
+def create_campaign(
+    request: CampaignCreateRequest,
+    db: Session = Depends(get_db),
+    _current: CurrentUser = Depends(require_role("advertiser", "moderator")),
+) -> Campaign:
     """Submit a new campaign. Returns immediately with status=pending_review —
     the policy review agent runs asynchronously via the campaign_review queue."""
     advertiser = _get_or_create_advertiser(db, request.advertiser_name)
@@ -68,9 +73,16 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db)) -> Campaign:
 
 
 @router.post("/{campaign_id}/moderate", response_model=CampaignResponse)
-def moderate_campaign(campaign_id: int, request: ModerationRequest, db: Session = Depends(get_db)) -> Campaign:
-    """Human moderator resolves a needs_review campaign. No authentication — only
-    attribution (reviewed_by is a freeform name, not verified identity).
+def moderate_campaign(
+    campaign_id: int,
+    request: ModerationRequest,
+    db: Session = Depends(get_db),
+    _current: CurrentUser = Depends(require_role("moderator")),
+) -> Campaign:
+    """Human moderator resolves a needs_review campaign. Requires the
+    moderator role (see docs/auth_plan.md) -- reviewed_by is still a
+    freeform name, not yet derived from the authenticated account, since
+    that's a separate change from just closing the access-control gap.
     Embedding/indexing into Pinecone happens asynchronously via
     pinecone_sync_consumer.py, not here (see docs/kafka_cdc_plan.md)."""
     campaign = db.get(Campaign, campaign_id)
