@@ -53,6 +53,13 @@ export function sendReaction(userId: string, adId: string, reaction: Reaction): 
   })
 }
 
+export function clearReaction(userId: string, adId: string): Promise<void> {
+  return request('/events/reaction', {
+    method: 'DELETE',
+    body: JSON.stringify({ user_id: userId, ad_id: adId }),
+  })
+}
+
 export function sendReport(userId: string, adId: string, category: ReportCategory, reason?: string): Promise<void> {
   return request('/events/report', {
     method: 'POST',

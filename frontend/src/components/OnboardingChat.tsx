@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { ArrowUp } from 'lucide-react'
 import {
+  clearReaction,
   logImpression,
   onboardingCheckpoint,
   sendReaction,
@@ -82,11 +83,14 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
       const { [adId]: _removed, ...rest } = r
       return rest
     })
-    // Unchecking only clears local UI state -- there's no backend endpoint to
-    // undo a reaction, so there's nothing to send in that case.
-    if (isUnchecking) return
     try {
-      await sendReaction(userId, adId, reaction)
+      if (isUnchecking) {
+        // Reverses the nudge/debit server-side too, not just the local
+        // highlight (see events_api.unreact / feedback.clear_feedback).
+        await clearReaction(userId, adId)
+      } else {
+        await sendReaction(userId, adId, reaction)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }

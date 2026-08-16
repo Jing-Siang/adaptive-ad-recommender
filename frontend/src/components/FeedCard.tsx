@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Flag, EyeOff, Info } from 'lucide-react'
-import { doNotShowAgain, logImpression, sendReaction, sendReport } from '../api'
+import { clearReaction, doNotShowAgain, logImpression, sendReaction, sendReport } from '../api'
 import type { FeedItem, Reaction, ReportCategory } from '../types'
 import { ReactionButtons } from './ReactionButtons'
 import { ReportModal } from './ReportModal'
@@ -38,6 +38,18 @@ export function FeedCard({
   }, [userId, item.ad_id])
 
   async function handleReact(r: Reaction) {
+    if (reaction === r) {
+      // Clicking the already-selected reaction clears it -- reverses the
+      // nudge/debit server-side too, not just the highlight (see
+      // events_api.unreact / feedback.clear_feedback).
+      setReaction(null)
+      try {
+        await clearReaction(userId, item.ad_id)
+      } catch {
+        // best-effort; reaction UI state already reflects the attempt
+      }
+      return
+    }
     setReaction(r)
     try {
       await sendReaction(userId, item.ad_id, r)
