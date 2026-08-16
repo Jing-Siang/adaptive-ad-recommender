@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.logging_utils import log_event
 from app.models import Campaign, Event
-from app.schemas import ImpressionRequest, ReactionRequest, ReportRequest
-from app.serving.feedback import record_feedback
+from app.schemas import ImpressionRequest, ReactionClearRequest, ReactionRequest, ReportRequest
+from app.serving.feedback import clear_feedback, record_feedback
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -38,6 +38,23 @@ def react(request: ReactionRequest, db: Session = Depends(get_db)) -> dict:
     db.commit()
     log_event("reaction_recorded", user_id=request.user_id, ad_id=request.ad_id, reaction=request.reaction)
     return {"status": "recorded"}
+
+
+@router.delete("/reaction", status_code=200)
+def unreact(request: ReactionClearRequest, db: Session = Depends(get_db)) -> dict:
+    """Removes the user's current reaction to an ad entirely, reversing
+    whatever nudge/debit it applied -- the symmetric inverse of react().
+    No Event row on removal: Event is an append-only record of what
+    happened (the original reaction genuinely did occur), not current
+    state -- that's exactly what the reactions table is for."""
+    try:
+        removed = clear_feedback(db, request.user_id, request.ad_id) is not None
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if removed:
+        log_event("reaction_removed", user_id=request.user_id, ad_id=request.ad_id)
+    return {"status": "removed" if removed else "no_reaction"}
 
 
 @router.post("/report", status_code=201)

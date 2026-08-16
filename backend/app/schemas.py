@@ -155,6 +155,15 @@ class ReactionRequest(BaseModel):
     reaction: Literal["like", "dislike", "interested"]
 
 
+class ReactionClearRequest(BaseModel):
+    """Request body for DELETE /events/reaction -- removes the user's
+    current reaction to an ad entirely, reversing its nudge/debit (see
+    feedback.clear_feedback). A no-op if there was no reaction to remove."""
+
+    user_id: str
+    ad_id: str
+
+
 class ReportRequest(BaseModel):
     """Request body for POST /events/report. reason is free text, required
     only when category is 'other' -- the predefined categories are

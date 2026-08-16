@@ -55,6 +55,48 @@ def test_react_returns_404_and_does_not_log_when_no_profile(mock_record_feedback
     assert event is None
 
 
+@patch("app.serving.events_api.clear_feedback", return_value=[1.0, 0.0, 0.0])
+def test_unreact_returns_removed_when_a_reaction_existed(mock_clear_feedback, campaign):
+    """DELETE /events/reaction reports "removed" (not "recorded") and
+    delegates entirely to clear_feedback -- no Event row involved."""
+    resp = client.request(
+        "DELETE",
+        "/events/reaction",
+        json={"user_id": "pytest-user", "ad_id": str(campaign.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "removed"}
+    mock_clear_feedback.assert_called_once_with(ANY, "pytest-user", str(campaign.id))
+
+
+@patch("app.serving.events_api.clear_feedback", return_value=None)
+def test_unreact_returns_no_reaction_when_nothing_to_remove(mock_clear_feedback, campaign):
+    """clear_feedback's None (nothing was there) surfaces as status
+    "no_reaction", not an error -- removing an already-cleared reaction is
+    a legitimate no-op, not a failure."""
+    resp = client.request(
+        "DELETE",
+        "/events/reaction",
+        json={"user_id": "pytest-user-never-reacted", "ad_id": str(campaign.id)},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "no_reaction"}
+
+
+@patch("app.serving.events_api.clear_feedback", side_effect=ValueError("no profile found for user 'x'"))
+def test_unreact_returns_404_when_no_profile(mock_clear_feedback, campaign):
+    """Same 404 contract as react() for a missing profile."""
+    resp = client.request(
+        "DELETE",
+        "/events/reaction",
+        json={"user_id": "pytest-user-with-no-profile", "ad_id": str(campaign.id)},
+    )
+
+    assert resp.status_code == 404
+
+
 def test_report_requires_reason_when_category_is_other(campaign):
     """ReportRequest's model_validator rejects category="other" with no
     reason before the request ever reaches the handler."""

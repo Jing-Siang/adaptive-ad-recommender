@@ -9,7 +9,14 @@ from sqlalchemy import delete
 
 from app.core.db import SessionLocal
 from app.models import Campaign, Reaction
-from app.serving.feedback import COST_PER_OUTCOME, LEARNING_RATE, _debit_campaign_budget, record_feedback, update_profile_vector
+from app.serving.feedback import (
+    COST_PER_OUTCOME,
+    LEARNING_RATE,
+    _debit_campaign_budget,
+    clear_feedback,
+    record_feedback,
+    update_profile_vector,
+)
 
 UNIT_PROFILE = [1.0, 0.0, 0.0]
 UNIT_AD = [0.0, 1.0, 0.0]
@@ -235,6 +242,76 @@ def test_record_feedback_raises_when_ad_not_found(mock_fetch, mock_update, db):
         record_feedback(db, "pytest-user", "999999999", "like")
 
     mock_update.assert_not_called()
+
+
+# --- clear_feedback: mock Pinecone (fetch_vector/update_vector), real DB ---
+
+
+@patch("app.serving.feedback.update_vector")
+@patch("app.serving.feedback.fetch_vector")
+def test_clear_feedback_reverses_nudge_and_refunds_budget(mock_fetch, mock_update, db, campaign):
+    """Removing an existing reaction is the exact inverse of applying it --
+    full refund, and the profile nudge should cancel back out."""
+    campaign.budget_total = 10.0
+    campaign.budget_spent = 0.0
+    db.commit()
+
+    mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
+
+    record_feedback(db, "pytest-user", str(campaign.id), "interested")
+    db.refresh(campaign)
+    assert campaign.budget_spent == pytest.approx(2.00)
+
+    result = clear_feedback(db, "pytest-user", str(campaign.id))
+
+    assert result is not None
+    db.refresh(campaign)
+    assert campaign.budget_spent == pytest.approx(0.0)
+
+    reactions = db.query(Reaction).filter_by(user_id="pytest-user", campaign_id=campaign.id).all()
+    assert reactions == []
+
+
+@patch("app.serving.feedback.update_vector")
+@patch("app.serving.feedback.fetch_vector")
+def test_clear_feedback_is_a_noop_when_nothing_to_remove(mock_fetch, mock_update, db, campaign):
+    """Clearing a reaction that was never set (or already cleared) touches
+    nothing -- no Pinecone write, no budget change, returns None."""
+    campaign.budget_total = 10.0
+    campaign.budget_spent = 0.0
+    db.commit()
+
+    mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
+
+    result = clear_feedback(db, "pytest-user-never-reacted", str(campaign.id))
+
+    assert result is None
+    mock_update.assert_not_called()
+    db.refresh(campaign)
+    assert campaign.budget_spent == 0.0
+
+
+@patch("app.serving.feedback.update_vector")
+@patch("app.serving.feedback.fetch_vector")
+def test_clear_feedback_revives_completed_campaign_on_refund(mock_fetch, mock_update, db, campaign):
+    """Removing the reaction that exhausted a campaign's budget should
+    refund it back under budget and revert status to active, same as a
+    switch-to-cheaper-outcome refund does."""
+    campaign.budget_total = 2.0
+    campaign.budget_spent = 0.0
+    db.commit()
+
+    mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
+
+    record_feedback(db, "pytest-user", str(campaign.id), "interested")
+    db.refresh(campaign)
+    assert campaign.status == "completed"
+
+    clear_feedback(db, "pytest-user", str(campaign.id))
+
+    db.refresh(campaign)
+    assert campaign.budget_spent == pytest.approx(0.0)
+    assert campaign.status == "active"
 
 
 @patch("app.serving.feedback.update_vector")

@@ -35,11 +35,22 @@ _UPSERT_REACTION_SQL = text(
     """
 )
 
+# Removes the user's current reaction entirely -- the symmetric inverse of
+# the upsert above. RETURNING yields zero rows if there was nothing to
+# remove (a true no-op), one row (the reaction that existed) otherwise.
+_DELETE_REACTION_SQL = text(
+    """
+    DELETE FROM reactions
+    WHERE user_id = :user_id AND campaign_id = :campaign_id
+    RETURNING reaction AS old_reaction
+    """
+)
+
 # Session-level (not transaction-scoped) advisory lock keyed on user_id --
 # guards the profile-vector fetch+write below, which Pinecone has no atomic
-# primitive for (unlike the reaction upsert above). Session-level so the
-# reaction-upsert's own db.commit() in between doesn't release it early;
-# always released in record_feedback's `finally`, not tied to commit/rollback.
+# primitive for (unlike the reaction upsert/delete above). Session-level so
+# the reaction-upsert's own db.commit() in between doesn't release it early;
+# always released in the caller's `finally`, not tied to commit/rollback.
 _ADVISORY_LOCK_SQL = text("SELECT pg_advisory_lock(hashtext(:user_id))")
 _ADVISORY_UNLOCK_SQL = text("SELECT pg_advisory_unlock(hashtext(:user_id))")
 
@@ -94,6 +105,23 @@ def _debit_campaign_budget(db: Session, campaign_id: int, cost_delta: float) -> 
         db.commit()
 
 
+def _apply_profile_nudge(
+    user_id: str,
+    ad_vector: list[float],
+    profile_vector: list[float],
+    old_outcome: str | None,
+    new_outcome: str | None,
+) -> list[float]:
+    """Shared by record_feedback and clear_feedback: nudges by the net rate
+    between old_outcome and new_outcome (either may be None -- no reaction)
+    and writes the result to Pinecone. Caller already holds the per-user
+    advisory lock and has fetched both vectors."""
+    rate_delta = LEARNING_RATE.get(new_outcome, 0.0) - LEARNING_RATE.get(old_outcome, 0.0)
+    new_vector = update_profile_vector(profile_vector, ad_vector, rate_delta)
+    update_vector(user_id, new_vector, namespace="users")
+    return new_vector
+
+
 def record_feedback(db: Session, user_id: str, ad_id: str, outcome: str) -> list[float]:
     """Handle a reaction (like/dislike/interested) to a served ad end to end:
     nudge the user's profile vector toward/away from the ad, and debit the
@@ -137,13 +165,50 @@ def record_feedback(db: Session, user_id: str, ad_id: str, outcome: str) -> list
         if old_outcome == outcome:
             return profile_vector
 
-        rate_delta = LEARNING_RATE.get(outcome, 0.0) - LEARNING_RATE.get(old_outcome, 0.0)
-        new_vector = update_profile_vector(profile_vector, ad_vector, rate_delta)
-        update_vector(user_id, new_vector, namespace="users")
+        new_vector = _apply_profile_nudge(user_id, ad_vector, profile_vector, old_outcome, outcome)
     finally:
         db.execute(_ADVISORY_UNLOCK_SQL, {"user_id": user_id})
 
     cost_delta = COST_PER_OUTCOME.get(outcome, 0.0) - COST_PER_OUTCOME.get(old_outcome, 0.0)
+    _debit_campaign_budget(db, campaign_id, cost_delta)
+
+    return new_vector
+
+
+def clear_feedback(db: Session, user_id: str, ad_id: str) -> list[float] | None:
+    """Remove the user's current reaction to an ad entirely -- the symmetric
+    inverse of record_feedback: reverses whatever nudge/debit the removed
+    reaction applied, rather than leaving it in place with nothing pointing
+    at it. Returns the updated profile vector, or None if there was no
+    reaction to remove (a true no-op -- nothing touched, same as a repeat
+    call to an already-cleared reaction)."""
+    campaign_id = int(ad_id)
+
+    ad_vector = fetch_vector(ad_id, namespace="ads")
+    if ad_vector is None:
+        raise ValueError(f"ad '{ad_id}' not found")
+
+    db.execute(_ADVISORY_LOCK_SQL, {"user_id": user_id})
+    try:
+        profile_vector = fetch_vector(user_id, namespace="users")
+        if profile_vector is None:
+            raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
+
+        row = db.execute(
+            _DELETE_REACTION_SQL,
+            {"user_id": user_id, "campaign_id": campaign_id},
+        ).one_or_none()
+        db.commit()
+
+        if row is None:
+            return None
+
+        old_outcome = row.old_reaction
+        new_vector = _apply_profile_nudge(user_id, ad_vector, profile_vector, old_outcome, None)
+    finally:
+        db.execute(_ADVISORY_UNLOCK_SQL, {"user_id": user_id})
+
+    cost_delta = 0.0 - COST_PER_OUTCOME.get(old_outcome, 0.0)
     _debit_campaign_budget(db, campaign_id, cost_delta)
 
     return new_vector
