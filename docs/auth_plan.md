@@ -105,20 +105,20 @@ independent of the rest of the migration below.
 
 ## Phase 3 -- frontend auth plumbing
 
-- [ ] `npm install @react-oauth/google`.
-- [ ] New `src/contexts/AuthContext.tsx`: holds `user`/`accessToken`/
+- [x] `npm install @react-oauth/google`.
+- [x] New `src/contexts/AuthContext.tsx`: holds `user`/`accessToken`/
       `loading`. `login(idToken)` POSTs to `/auth/google`. `logout()`
       POSTs to `/auth/logout` then clears state. On mount, if a token
       exists in localStorage, calls `/auth/me` to validate it, falling
       back to `/auth/refresh` (cookie sent automatically) before giving
       up and showing the login screen.
-- [ ] `src/api.ts`: `request()` attaches `Authorization: Bearer <token>`
+- [x] `src/api.ts`: `request()` attaches `Authorization: Bearer <token>`
       automatically, sets `credentials: 'include'`. On a 401, attempts
       one silent `/auth/refresh` + retry before surfacing the error. Adds
       `googleLogin`, `refreshAccessToken`, `logout`, `fetchMe`.
-- [ ] Login gate: wrap `<App>` (`src/App.tsx`) so Google's Sign-In button
+- [x] Login gate: wrap `<App>` (`src/App.tsx`) so Google's Sign-In button
       renders when `user` is null, the real app otherwise.
-- [ ] Role-gated routes: `/campaigns` requires `advertiser`/`moderator`,
+- [x] Role-gated routes: `/campaigns` requires `advertiser`/`moderator`,
       `/moderator` requires `moderator` -- redirect or show a plain "not
       authorized" message otherwise.
 

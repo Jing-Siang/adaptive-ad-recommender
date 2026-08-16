@@ -1,4 +1,18 @@
 // --------------------------------------------------------------------------
+// Auth: Google OAuth login, our own JWT session (see docs/auth_plan.md)
+// --------------------------------------------------------------------------
+
+export type Role = 'end_user' | 'advertiser' | 'moderator'
+
+export interface Account {
+  id: number
+  email: string
+  display_name: string
+  avatar_url: string | null
+  role: Role
+}
+
+// --------------------------------------------------------------------------
 // Serving: ads, feed, reactions
 // --------------------------------------------------------------------------
 
