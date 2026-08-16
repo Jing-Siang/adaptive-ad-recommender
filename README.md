@@ -22,7 +22,7 @@ See [`docs/spec.md`](docs/spec.md) for the full design.
 | Backend | FastAPI |
 | Frontend | React + Vite + TypeScript, Tailwind CSS, react-router-dom |
 | Reliability | `tenacity`, Pydantic, atomic SQL budget updates |
-| Testing | `pytest` (92 tests, 1 integration test run separately) |
+| Testing | `pytest` (95 tests, 1 integration test run separately) |
 | Deployment | Docker Compose locally → Railway/Render for production |
 
 ## Repo layout
@@ -89,7 +89,7 @@ make migrate
 # equivalent to: cd backend && source .venv/bin/activate && alembic upgrade head
 ```
 
-Creates the advertisers/campaigns tables.
+Creates the schema (advertisers, campaigns, events, reactions).
 
 ### 3. Run the backend + worker (two processes)
 
