@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.core.auth import create_access_token, create_refresh_token, get_current_user, require_role
+from app.core.auth import create_access_token, create_refresh_token, get_current_user, require_role, revoke_refresh_token
 from app.main import app
 from app.models import User
 
@@ -32,6 +32,7 @@ def test_google_login_creates_new_account_as_end_user(mock_verify, db):
     assert body["access_token"]
     assert resp.cookies.get("refresh_token")
 
+    revoke_refresh_token(resp.cookies.get("refresh_token"))
     db.query(User).filter_by(google_sub="google-sub-123").delete()
     db.commit()
 
@@ -52,6 +53,7 @@ def test_google_login_finds_existing_account_by_google_sub(mock_verify, db):
     assert body["user"]["id"] == existing.id
     assert body["user"]["role"] == "moderator"  # not reset to end_user
 
+    revoke_refresh_token(resp.cookies.get("refresh_token"))
     db.delete(existing)
     db.commit()
 
@@ -69,6 +71,8 @@ def test_refresh_rotates_token_and_issues_new_access_token(db, user):
     # the old refresh token no longer works -- rotation revoked it
     replay = client.post("/auth/refresh", cookies={"refresh_token": old_refresh})
     assert replay.status_code == 401
+
+    revoke_refresh_token(new_refresh)
 
 
 def test_refresh_rejects_missing_or_invalid_cookie():
