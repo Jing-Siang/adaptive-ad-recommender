@@ -186,7 +186,7 @@ def record_feedback(db: Session, user_id: str, ad_id: str, outcome: str) -> list
 
         row = db.execute(
             _UPSERT_REACTION_SQL,
-            {"user_id": user_id, "campaign_id": campaign_id, "new_reaction": outcome},
+            {"user_id": int(user_id), "campaign_id": campaign_id, "new_reaction": outcome},
         ).one()
         db.commit()
         old_outcome = row.old_reaction
@@ -222,7 +222,7 @@ def clear_feedback(db: Session, user_id: str, ad_id: str) -> list[float] | None:
 
         row = db.execute(
             _DELETE_REACTION_SQL,
-            {"user_id": user_id, "campaign_id": campaign_id},
+            {"user_id": int(user_id), "campaign_id": campaign_id},
         ).one_or_none()
         db.commit()
 

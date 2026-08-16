@@ -26,6 +26,32 @@ CAMPAIGN_STATUSES = (
     "completed",       # budget exhausted or end_date passed
 )
 
+# Valid values for User.role, same "Pydantic-layer enum, not DB enum" pattern
+# as above. A superset relationship, not a multi-role table: moderator can do
+# everything advertiser/end_user can, advertiser everything end_user can.
+USER_ROLES = (
+    "end_user",    # default on first login -- onboarding, feed, reactions
+    "advertiser",  # + submit campaigns, view performance dashboard
+    "moderator",   # + approve/reject campaigns
+)
+
+
+class User(Base):
+    """A real, authenticated account (Google OAuth) -- see docs/auth_plan.md.
+    id is what everything downstream calls user_id: Pinecone vector IDs
+    (namespace="users"), Reaction.user_id, Event.user_id -- stringified,
+    same pattern already used for Campaign.id as Pinecone's ad vector ID."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    google_sub: Mapped[str] = mapped_column(String(255), unique=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    display_name: Mapped[str] = mapped_column(String(200))
+    avatar_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    role: Mapped[str] = mapped_column(String(20), default="end_user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 class Advertiser(Base):
     __tablename__ = "advertisers"
@@ -95,15 +121,15 @@ class Reaction(Base):
     campaign_id), updated in place on switch/re-click. Separate from Event
     (the append-only history the dashboard counts) on purpose: this table
     answers "what does this user currently think of this ad", which is a
-    current-state question, not a log query. Also the natural seam for a
-    future accounts feature -- only user_id's type/constraint would need to
-    change, this table's shape stays the same."""
+    current-state question, not a log query. user_id is a real FK to users
+    now that accounts exist (see docs/auth_plan.md) -- this table's shape
+    was deliberately built to only need that one change."""
 
     __tablename__ = "reactions"
     __table_args__ = (UniqueConstraint("user_id", "campaign_id", name="uq_reactions_user_campaign"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(200))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
     reaction: Mapped[str] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

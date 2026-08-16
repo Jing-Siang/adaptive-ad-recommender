@@ -14,6 +14,53 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --------------------------------------------------------------------------
+# Auth: Google OAuth login, our own JWT session (see docs/auth_plan.md)
+# --------------------------------------------------------------------------
+
+
+class CurrentUser(BaseModel):
+    """Decoded straight from a verified access token's claims -- no DB hit
+    per request, the whole point of a stateless access token. Only carries
+    what's actually in the token; see AccountResponse for the full record."""
+
+    id: int
+    email: str
+    role: str
+
+
+class GoogleLoginRequest(BaseModel):
+    """Request body for POST /auth/google -- the ID token Google's Identity
+    Services JS handed the frontend directly, verified server-side against
+    Google's public keys before we trust any of its claims."""
+
+    id_token: str
+
+
+class AccountResponse(BaseModel):
+    """Read model for a User account -- returned by /auth/google, /auth/me.
+    Distinct from UserResponse (the Pinecone interest-profile read model,
+    a different concept -- this is the real, authenticated identity)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    display_name: str
+    avatar_url: str | None
+    role: str
+
+
+class AuthTokenResponse(BaseModel):
+    """Response for /auth/google and /auth/refresh -- the access token goes
+    in the body (frontend stores it in memory/localStorage); the refresh
+    token is never in a JSON body at all, only set as an httpOnly cookie
+    directly on the response."""
+
+    access_token: str
+    user: AccountResponse
+
+
+# --------------------------------------------------------------------------
 # Serving: recommending an ad to a user (app/serving/)
 # --------------------------------------------------------------------------
 

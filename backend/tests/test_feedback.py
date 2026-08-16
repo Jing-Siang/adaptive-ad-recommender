@@ -22,7 +22,7 @@ UNIT_PROFILE = [1.0, 0.0, 0.0]
 UNIT_AD = [0.0, 1.0, 0.0]
 
 
-def _clear_reaction(db, user_id: str, campaign_id: int) -> None:
+def _clear_reaction(db, user_id: int, campaign_id: int) -> None:
     """record_feedback upserts a real Reaction row via raw SQL -- clean it up
     before the campaign fixture's teardown deletes the campaign, or that
     delete hits the same FK-violation shape as Event rows do."""
@@ -141,7 +141,7 @@ def test_debit_campaign_budget_negative_delta_refunds_and_revives_completed(db, 
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_first_reaction_applies_full_nudge_and_debit(mock_fetch, mock_update, db, campaign):
+def test_record_feedback_first_reaction_applies_full_nudge_and_debit(mock_fetch, mock_update, db, campaign, user):
     """A brand-new reaction (no prior Reaction row) behaves like the old
     single-outcome path: full nudge, full debit."""
     campaign.budget_total = 10.0
@@ -150,22 +150,22 @@ def test_record_feedback_first_reaction_applies_full_nudge_and_debit(mock_fetch,
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
 
-    new_vector = record_feedback(db, "pytest-user", str(campaign.id), "like")
+    new_vector = record_feedback(db, str(user.id), str(campaign.id), "like")
 
     assert new_vector is not None
     mock_update.assert_called_once()
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.50)
 
-    reaction = db.query(Reaction).filter_by(user_id="pytest-user", campaign_id=campaign.id).one()
+    reaction = db.query(Reaction).filter_by(user_id=user.id, campaign_id=campaign.id).one()
     assert reaction.reaction == "like"
 
-    _clear_reaction(db, "pytest-user", campaign.id)
+    _clear_reaction(db, user.id, campaign.id)
 
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_same_reaction_twice_is_a_true_noop(mock_fetch, mock_update, db, campaign):
+def test_record_feedback_same_reaction_twice_is_a_true_noop(mock_fetch, mock_update, db, campaign, user):
     """Re-clicking the same reaction must not stack a second nudge/debit on
     top of the first -- this is the exact bug the reactions table fixes."""
     campaign.budget_total = 10.0
@@ -174,22 +174,22 @@ def test_record_feedback_same_reaction_twice_is_a_true_noop(mock_fetch, mock_upd
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
 
-    record_feedback(db, "pytest-user", str(campaign.id), "like")
-    record_feedback(db, "pytest-user", str(campaign.id), "like")
+    record_feedback(db, str(user.id), str(campaign.id), "like")
+    record_feedback(db, str(user.id), str(campaign.id), "like")
 
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.50)
     mock_update.assert_called_once()  # only the first call touched the profile vector
 
-    reactions = db.query(Reaction).filter_by(user_id="pytest-user", campaign_id=campaign.id).all()
+    reactions = db.query(Reaction).filter_by(user_id=user.id, campaign_id=campaign.id).all()
     assert len(reactions) == 1
 
-    _clear_reaction(db, "pytest-user", campaign.id)
+    _clear_reaction(db, user.id, campaign.id)
 
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_switching_applies_net_delta_and_can_refund(mock_fetch, mock_update, db, campaign):
+def test_record_feedback_switching_applies_net_delta_and_can_refund(mock_fetch, mock_update, db, campaign, user):
     """Switching from interested ($2.00) to like ($0.50) refunds the
     difference (-$1.50), not a second full $0.50 charge on top of $2.00."""
     campaign.budget_total = 10.0
@@ -198,19 +198,19 @@ def test_record_feedback_switching_applies_net_delta_and_can_refund(mock_fetch, 
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
 
-    record_feedback(db, "pytest-user", str(campaign.id), "interested")
+    record_feedback(db, str(user.id), str(campaign.id), "interested")
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(2.00)
 
-    record_feedback(db, "pytest-user", str(campaign.id), "like")
+    record_feedback(db, str(user.id), str(campaign.id), "like")
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.50)
 
-    reactions = db.query(Reaction).filter_by(user_id="pytest-user", campaign_id=campaign.id).all()
+    reactions = db.query(Reaction).filter_by(user_id=user.id, campaign_id=campaign.id).all()
     assert len(reactions) == 1  # updated in place, not a second row
     assert reactions[0].reaction == "like"
 
-    _clear_reaction(db, "pytest-user", campaign.id)
+    _clear_reaction(db, user.id, campaign.id)
 
 
 @patch("app.serving.feedback.update_vector")
@@ -249,7 +249,7 @@ def test_record_feedback_raises_when_ad_not_found(mock_fetch, mock_update, db):
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_clear_feedback_reverses_nudge_and_refunds_budget(mock_fetch, mock_update, db, campaign):
+def test_clear_feedback_reverses_nudge_and_refunds_budget(mock_fetch, mock_update, db, campaign, user):
     """Removing an existing reaction is the exact inverse of applying it --
     full refund, and the profile nudge should cancel back out."""
     campaign.budget_total = 10.0
@@ -258,23 +258,23 @@ def test_clear_feedback_reverses_nudge_and_refunds_budget(mock_fetch, mock_updat
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
 
-    record_feedback(db, "pytest-user", str(campaign.id), "interested")
+    record_feedback(db, str(user.id), str(campaign.id), "interested")
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(2.00)
 
-    result = clear_feedback(db, "pytest-user", str(campaign.id))
+    result = clear_feedback(db, str(user.id), str(campaign.id))
 
     assert result is not None
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.0)
 
-    reactions = db.query(Reaction).filter_by(user_id="pytest-user", campaign_id=campaign.id).all()
+    reactions = db.query(Reaction).filter_by(user_id=user.id, campaign_id=campaign.id).all()
     assert reactions == []
 
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_clear_feedback_is_a_noop_when_nothing_to_remove(mock_fetch, mock_update, db, campaign):
+def test_clear_feedback_is_a_noop_when_nothing_to_remove(mock_fetch, mock_update, db, campaign, user):
     """Clearing a reaction that was never set (or already cleared) touches
     nothing -- no Pinecone write, no budget change, returns None."""
     campaign.budget_total = 10.0
@@ -283,7 +283,7 @@ def test_clear_feedback_is_a_noop_when_nothing_to_remove(mock_fetch, mock_update
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
 
-    result = clear_feedback(db, "pytest-user-never-reacted", str(campaign.id))
+    result = clear_feedback(db, str(user.id), str(campaign.id))
 
     assert result is None
     mock_update.assert_not_called()
@@ -293,7 +293,7 @@ def test_clear_feedback_is_a_noop_when_nothing_to_remove(mock_fetch, mock_update
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_clear_feedback_revives_completed_campaign_on_refund(mock_fetch, mock_update, db, campaign):
+def test_clear_feedback_revives_completed_campaign_on_refund(mock_fetch, mock_update, db, campaign, user):
     """Removing the reaction that exhausted a campaign's budget should
     refund it back under budget and revert status to active, same as a
     switch-to-cheaper-outcome refund does."""
@@ -303,11 +303,11 @@ def test_clear_feedback_revives_completed_campaign_on_refund(mock_fetch, mock_up
 
     mock_fetch.side_effect = lambda vector_id, namespace: UNIT_AD if namespace == "ads" else UNIT_PROFILE
 
-    record_feedback(db, "pytest-user", str(campaign.id), "interested")
+    record_feedback(db, str(user.id), str(campaign.id), "interested")
     db.refresh(campaign)
     assert campaign.status == "completed"
 
-    clear_feedback(db, "pytest-user", str(campaign.id))
+    clear_feedback(db, str(user.id), str(campaign.id))
 
     db.refresh(campaign)
     assert campaign.budget_spent == pytest.approx(0.0)
@@ -316,7 +316,7 @@ def test_clear_feedback_revives_completed_campaign_on_refund(mock_fetch, mock_up
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_serializes_profile_vector_updates_for_same_user(mock_fetch, mock_update, db, campaign, advertiser):
+def test_record_feedback_serializes_profile_vector_updates_for_same_user(mock_fetch, mock_update, db, campaign, advertiser, user):
     """Two genuinely concurrent reactions from the same user (different ads,
     separate DB connections/threads) must not both fetch the profile vector
     before either writes back -- that's the race documented in
@@ -359,7 +359,7 @@ def test_record_feedback_serializes_profile_vector_updates_for_same_user(mock_fe
     def worker(ad_id: int, outcome: str) -> None:
         session = SessionLocal()
         try:
-            record_feedback(session, "pytest-concurrent-user", str(ad_id), outcome)
+            record_feedback(session, str(user.id), str(ad_id), outcome)
         finally:
             session.close()
 
@@ -386,7 +386,7 @@ def test_record_feedback_serializes_profile_vector_updates_for_same_user(mock_fe
             assert open_thread == tid
             open_thread = None
 
-    _clear_reaction(db, "pytest-concurrent-user", campaign.id)
-    _clear_reaction(db, "pytest-concurrent-user", campaign_b.id)
+    _clear_reaction(db, user.id, campaign.id)
+    _clear_reaction(db, user.id, campaign_b.id)
     db.delete(campaign_b)
     db.commit()

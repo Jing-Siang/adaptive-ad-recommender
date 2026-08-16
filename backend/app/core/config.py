@@ -19,5 +19,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:5173"
 
+    # --- Auth (see docs/auth_plan.md) ---
+    google_client_id: str = ""
+    jwt_secret: str = ""
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+
 
 settings = Settings()
