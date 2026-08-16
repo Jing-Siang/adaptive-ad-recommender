@@ -1,7 +1,10 @@
+from contextlib import contextmanager
+
 import numpy as np
 from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
+from app.core.db import engine
 from app.core.vector_store import fetch_vector, update_vector
 from app.models import Campaign
 
@@ -49,10 +52,37 @@ _DELETE_REACTION_SQL = text(
 # Session-level (not transaction-scoped) advisory lock keyed on user_id --
 # guards the profile-vector fetch+write below, which Pinecone has no atomic
 # primitive for (unlike the reaction upsert/delete above). Session-level so
-# the reaction-upsert's own db.commit() in between doesn't release it early;
-# always released in the caller's `finally`, not tied to commit/rollback.
+# the reaction-upsert's own db.commit() in between doesn't release it early.
 _ADVISORY_LOCK_SQL = text("SELECT pg_advisory_lock(hashtext(:user_id))")
 _ADVISORY_UNLOCK_SQL = text("SELECT pg_advisory_unlock(hashtext(:user_id))")
+
+
+@contextmanager
+def _user_lock(user_id: str):
+    """Holds the advisory lock above for the duration of the block, on a
+    dedicated connection -- deliberately NOT the caller's ORM Session.
+
+    The locked region contains a db.commit() partway through (the reaction
+    upsert/delete). SQLAlchemy's Session releases its connection back to
+    the pool on commit and checks out a connection (not necessarily the
+    same one) for the next statement -- so routing the lock/unlock through
+    `db` let them land on two different physical connections. Postgres
+    advisory-lock release is connection-scoped (confirmed against the
+    docs: "if the lock was not held [by this session], false is returned"),
+    so the unlock from the wrong connection silently no-ops, leaving the
+    original connection to go back into the pool still holding the lock --
+    invisibly, since locks only auto-release when a session actually ends,
+    not on commit or pool checkin. Caught live: a later caller then blocks
+    forever on a lock nothing will ever release. A dedicated connection
+    held open for the whole block guarantees the lock and unlock always
+    run on the same one."""
+    conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+    conn.execute(_ADVISORY_LOCK_SQL, {"user_id": user_id})
+    try:
+        yield
+    finally:
+        conn.execute(_ADVISORY_UNLOCK_SQL, {"user_id": user_id})
+        conn.close()
 
 
 def update_profile_vector(
@@ -149,8 +179,7 @@ def record_feedback(db: Session, user_id: str, ad_id: str, outcome: str) -> list
     if ad_vector is None:
         raise ValueError(f"ad '{ad_id}' not found")
 
-    db.execute(_ADVISORY_LOCK_SQL, {"user_id": user_id})
-    try:
+    with _user_lock(user_id):
         profile_vector = fetch_vector(user_id, namespace="users")
         if profile_vector is None:
             raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
@@ -166,8 +195,6 @@ def record_feedback(db: Session, user_id: str, ad_id: str, outcome: str) -> list
             return profile_vector
 
         new_vector = _apply_profile_nudge(user_id, ad_vector, profile_vector, old_outcome, outcome)
-    finally:
-        db.execute(_ADVISORY_UNLOCK_SQL, {"user_id": user_id})
 
     cost_delta = COST_PER_OUTCOME.get(outcome, 0.0) - COST_PER_OUTCOME.get(old_outcome, 0.0)
     _debit_campaign_budget(db, campaign_id, cost_delta)
@@ -188,8 +215,7 @@ def clear_feedback(db: Session, user_id: str, ad_id: str) -> list[float] | None:
     if ad_vector is None:
         raise ValueError(f"ad '{ad_id}' not found")
 
-    db.execute(_ADVISORY_LOCK_SQL, {"user_id": user_id})
-    try:
+    with _user_lock(user_id):
         profile_vector = fetch_vector(user_id, namespace="users")
         if profile_vector is None:
             raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
@@ -205,8 +231,6 @@ def clear_feedback(db: Session, user_id: str, ad_id: str) -> list[float] | None:
 
         old_outcome = row.old_reaction
         new_vector = _apply_profile_nudge(user_id, ad_vector, profile_vector, old_outcome, None)
-    finally:
-        db.execute(_ADVISORY_UNLOCK_SQL, {"user_id": user_id})
 
     cost_delta = 0.0 - COST_PER_OUTCOME.get(old_outcome, 0.0)
     _debit_campaign_budget(db, campaign_id, cost_delta)
