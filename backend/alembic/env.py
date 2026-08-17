@@ -7,7 +7,7 @@ from alembic import context
 
 from app.core.config import settings
 from app.core.db import Base
-from app.models import Advertiser, Campaign, Event, Reaction, User  # noqa: F401 — import so they register on Base.metadata
+from app.models import Campaign, Event, Reaction, User  # noqa: F401 — import so they register on Base.metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -1,7 +1,8 @@
 """Demo artifact: loads the pre-generated campaign catalog (data/seed_campaigns.json,
 produced by generate_seed_campaign_data.py) into Postgres + Pinecone -- creates
-real Advertiser/Campaign rows (proper ownership, budget, eligibility dates -- the
-full data model), but sets status="active" directly and calls index_campaign
+real Campaign rows owned by a synthetic seed User account (proper ownership,
+budget, eligibility dates -- the full data model), but sets status="active" directly
+and calls index_campaign
 (embed + Pinecone upsert) directly, skipping the async policy-review job
 entirely. Category exclusions (alcohol/gambling, matching serving/guardrails.py's
 CATEGORY_EXCLUSIONS) are applied directly from each entry's category, not
@@ -29,35 +30,44 @@ from pathlib import Path
 from app.campaigns.indexing import index_campaign
 from app.core.db import SessionLocal
 from app.core.logging_utils import log_event
-from app.models import Advertiser, Campaign
+from app.models import Campaign, User
 from app.serving.guardrails import CATEGORY_EXCLUSIONS
 
-_ADVERTISER_NAME = "Demo Seed Advertiser"
+# A synthetic seed account, not a real Google login -- fixed google_sub so
+# re-running this script reuses the same account instead of creating a new
+# one each time (matches the old Advertiser-by-fixed-name idempotency).
+_SEED_GOOGLE_SUB = "seed-script"
+_SEED_DISPLAY_NAME = "Demo Seed Advertiser"
 _DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "seed_campaigns.json"
 
 
 def seed_campaigns() -> list[Campaign]:
-    """Create the seed advertiser (if needed), then create + index a Campaign
+    """Create the seed account (if needed), then create + index a Campaign
     row for every entry in data/seed_campaigns.json -- skipping the async
     review job entirely, same end state as a real approved campaign
     (status=active, embedded, indexed). Skips re-seeding entirely if this
-    advertiser already has a full catalog, so re-running the script doesn't
+    account already has a full catalog, so re-running the script doesn't
     pile up duplicate batches."""
     seed_data = json.loads(_DATA_PATH.read_text())
 
     db = SessionLocal()
     created = []
     try:
-        advertiser = db.query(Advertiser).filter_by(name=_ADVERTISER_NAME).first()
-        if advertiser is None:
-            advertiser = Advertiser(name=_ADVERTISER_NAME)
-            db.add(advertiser)
+        seed_user = db.query(User).filter_by(google_sub=_SEED_GOOGLE_SUB).first()
+        if seed_user is None:
+            seed_user = User(
+                google_sub=_SEED_GOOGLE_SUB,
+                email="seed-script@example.com",
+                display_name=_SEED_DISPLAY_NAME,
+                role="advertiser",
+            )
+            db.add(seed_user)
             db.flush()
         else:
-            existing_count = db.query(Campaign).filter_by(advertiser_id=advertiser.id).count()
+            existing_count = db.query(Campaign).filter_by(user_id=seed_user.id).count()
             if existing_count >= len(seed_data):
                 print(
-                    f"Advertiser already has {existing_count} campaigns "
+                    f"Seed account already has {existing_count} campaigns "
                     f"(>= {len(seed_data)} in seed file) -- skipping."
                 )
                 return []
@@ -66,7 +76,7 @@ def seed_campaigns() -> list[Campaign]:
         for entry in seed_data:
             excluded_categories = sorted(CATEGORY_EXCLUSIONS.get(entry["category"], set()))
             campaign = Campaign(
-                advertiser_id=advertiser.id,
+                user_id=seed_user.id,
                 headline=entry["headline"],
                 description=entry["description"],
                 category=entry["category"],

@@ -7,33 +7,25 @@ from app.core.auth import require_role
 from app.core.db import get_db
 from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
-from app.models import Advertiser, Campaign
+from app.models import Campaign
 from app.core.queue import campaign_review_queue
 from app.schemas import CampaignCreateRequest, CampaignResponse, CurrentUser, ModerationRequest
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
-def _get_or_create_advertiser(db: Session, name: str) -> Advertiser:
-    advertiser = db.query(Advertiser).filter_by(name=name).first()
-    if advertiser is None:
-        advertiser = Advertiser(name=name)
-        db.add(advertiser)
-        db.flush()
-    return advertiser
-
-
 @router.post("", response_model=CampaignResponse, status_code=201)
 def create_campaign(
     request: CampaignCreateRequest,
     db: Session = Depends(get_db),
-    _current: CurrentUser = Depends(require_role("advertiser", "moderator")),
+    current: CurrentUser = Depends(require_role("advertiser", "moderator")),
 ) -> Campaign:
     """Submit a new campaign. Returns immediately with status=pending_review —
-    the policy review agent runs asynchronously via the campaign_review queue."""
-    advertiser = _get_or_create_advertiser(db, request.advertiser_name)
+    the policy review agent runs asynchronously via the campaign_review queue.
+    The submitting account is the owner directly (user_id) -- no separate
+    Advertiser entity, see docs/auth_plan.md."""
     campaign = Campaign(
-        advertiser_id=advertiser.id,
+        user_id=current.id,
         headline=request.headline,
         description=request.description,
         category=request.category,
@@ -49,7 +41,7 @@ def create_campaign(
     db.refresh(campaign)
 
     campaign_review_queue.enqueue(review_campaign_job, campaign.id)
-    log_event("campaign_submitted", campaign_id=campaign.id, advertiser=request.advertiser_name)
+    log_event("campaign_submitted", campaign_id=campaign.id, user_id=current.id)
 
     return campaign
 

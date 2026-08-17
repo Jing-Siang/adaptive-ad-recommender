@@ -11,6 +11,7 @@ index_campaign(), and the consumer's own re-embed/metadata-patch calls."""
 import subprocess
 import sys
 import time
+import uuid
 from datetime import date
 
 import pytest
@@ -22,7 +23,7 @@ from app.campaigns.pinecone_sync_consumer import GROUP_ID, TOPIC
 from app.core.config import settings
 from app.core.vector_store import delete_vector, fetch_metadata, fetch_vector
 from app.main import app
-from app.models import Advertiser, Campaign, Event
+from app.models import Campaign, Event, User
 
 client = TestClient(app)
 
@@ -58,13 +59,18 @@ def test_budget_exhaustion_updates_pinecone_via_consumer(db):
     near-exhausted campaign, since the thing under test is specifically
     the consumer's reaction to a budget-exhaustion event, not the review
     flow (already covered elsewhere)."""
-    advertiser = Advertiser(name="Integration Test Advertiser")
-    db.add(advertiser)
+    submitter = User(
+        google_sub=f"integration-test-{uuid.uuid4()}",
+        email=f"integration-test-{uuid.uuid4()}@example.com",
+        display_name="Integration Test Advertiser",
+        role="advertiser",
+    )
+    db.add(submitter)
     db.commit()
-    db.refresh(advertiser)
+    db.refresh(submitter)
 
     campaign = Campaign(
-        advertiser_id=advertiser.id,
+        user_id=submitter.id,
         headline="Integration Test Campaign",
         description="Exists only to prove the consumer reacts to a real budget-exhaustion event.",
         category="software",
@@ -123,5 +129,5 @@ def test_budget_exhaustion_updates_pinecone_via_consumer(db):
         delete_vector(str(campaign_id), namespace="ads")
         db.query(Event).filter_by(campaign_id=campaign_id).delete()
         db.delete(campaign)
-        db.delete(advertiser)
+        db.delete(submitter)
         db.commit()

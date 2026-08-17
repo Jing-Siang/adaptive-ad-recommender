@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 
 from app.core.db import SessionLocal
-from app.models import Advertiser, Campaign, User
+from app.models import Campaign, User
 
 
 @pytest.fixture
@@ -24,10 +24,9 @@ def db():
 def user(db):
     """A real account -- reactions.user_id is a real FK now (see
     docs/auth_plan.md), so tests need an actual User row to react as,
-    not a freeform string. Unique google_sub/email per call (not a fixed
-    value like the advertiser fixture uses) since those columns are
-    unique-constrained -- a prior test's failed teardown shouldn't be
-    able to collide with this one."""
+    not a freeform string. Unique google_sub/email per call since those
+    columns are unique-constrained -- a prior test's failed teardown
+    shouldn't be able to collide with this one."""
     u = User(
         google_sub=f"test-google-sub-{uuid.uuid4()}",
         email=f"pytest-{uuid.uuid4()}@example.com",
@@ -87,23 +86,14 @@ def auth_header(user: User) -> dict[str, str]:
 
 
 @pytest.fixture
-def advertiser(db):
-    adv = Advertiser(name="Test Advertiser (pytest)")
-    db.add(adv)
-    db.commit()
-    db.refresh(adv)
-    yield adv
-    db.delete(adv)
-    db.commit()
-
-
-@pytest.fixture
-def campaign(db, advertiser):
+def campaign(db, advertiser_user):
     """An active, budgeted campaign ready to serve -- the common case most
     tests want. Tests needing a different status/budget should build their
-    own Campaign instead of using this fixture."""
+    own Campaign instead of using this fixture. Owned by advertiser_user --
+    Campaign.user_id is a real FK to users.id, no separate Advertiser
+    entity (see docs/auth_plan.md)."""
     c = Campaign(
-        advertiser_id=advertiser.id,
+        user_id=advertiser_user.id,
         headline="Test Headline",
         description="Test description for pytest fixtures",
         category="hardware",

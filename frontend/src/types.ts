@@ -107,7 +107,6 @@ export interface PerformanceResponse {
 // --------------------------------------------------------------------------
 
 export interface CampaignCreateRequest {
-  advertiser_name: string
   headline: string
   description: string
   category: string
@@ -120,7 +119,7 @@ export interface CampaignCreateRequest {
 
 export interface CampaignResponse {
   id: number
-  advertiser_id: number
+  user_id: number
   headline: string
   description: string
   category: string

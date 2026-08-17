@@ -351,11 +351,11 @@ class ReviewDecision(BaseModel):
 
 
 class CampaignCreateRequest(BaseModel):
-    """Request body for POST /campaigns. advertiser_name is get-or-create —
-    there's no separate advertiser-signup step (no auth in this project,
-    see docs/spec.md)."""
+    """Request body for POST /campaigns. No advertiser_name field -- the
+    submitting account (require_role("advertiser", "moderator")) is the
+    campaign's owner directly; there's no separate Advertiser
+    business-name concept (see docs/auth_plan.md)."""
 
-    advertiser_name: str
     headline: str
     description: str
     category: str
@@ -374,7 +374,7 @@ class CampaignResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    advertiser_id: int
+    user_id: int
     headline: str
     description: str
     category: str
@@ -394,8 +394,10 @@ class CampaignResponse(BaseModel):
 
 class ModerationRequest(BaseModel):
     """Request body for POST /campaigns/{id}/moderate — a human resolving a
-    needs_review campaign. reviewed_by is a freeform name for the audit
-    trail only, not a verified identity (no auth in this project)."""
+    needs_review campaign (require_role("moderator")). reviewed_by is
+    still a separate freeform name for the audit trail, not derived from
+    the authenticated account -- a deliberate choice to keep attribution
+    decoupled from login identity."""
 
     outcome: Literal["approved", "rejected"]
     reason: str

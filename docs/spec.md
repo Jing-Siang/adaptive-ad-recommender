@@ -253,7 +253,7 @@ was this campaign rejected" after the fact.
 backend/
 ├── app/
 │   ├── main.py                    # FastAPI entrypoint, wires all routers
-│   ├── models.py                   # SQLAlchemy: User, Advertiser, Campaign, Event, Reaction (shared)
+│   ├── models.py                   # SQLAlchemy: User, Campaign, Event, Reaction (shared)
 │   ├── schemas.py                   # Pydantic schemas (shared, see its module docstring)
 │   ├── policy/
 │   │   └── ad_policy.md              # company ad policy, served via MCP
@@ -316,8 +316,9 @@ backend/
   — populate a ~288-campaign catalog across 18 categories so the feed and
   onboarding checkpoints have real candidates. Split into a generation step
   (one LLM call per category, writes the versioned `data/seed_campaigns.json`)
-  and a loading step (creates Advertiser/Campaign rows, sets status=active
-  directly, embeds + indexes into Pinecone) -- the async policy-review job
+  and a loading step (creates a synthetic seed User account + Campaign
+  rows owned by it, sets status=active directly, embeds + indexes into
+  Pinecone) -- the async policy-review job
   is skipped entirely, with category exclusions (alcohol/gambling) applied
   directly from `guardrails.py`'s `CATEGORY_EXCLUSIONS`. Re-running the
   loading step alone is free and deterministic; only re-run the generation

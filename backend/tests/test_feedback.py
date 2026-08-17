@@ -316,14 +316,16 @@ def test_clear_feedback_revives_completed_campaign_on_refund(mock_fetch, mock_up
 
 @patch("app.serving.feedback.update_vector")
 @patch("app.serving.feedback.fetch_vector")
-def test_record_feedback_serializes_profile_vector_updates_for_same_user(mock_fetch, mock_update, db, campaign, advertiser, user):
+def test_record_feedback_serializes_profile_vector_updates_for_same_user(
+    mock_fetch, mock_update, db, campaign, advertiser_user, user
+):
     """Two genuinely concurrent reactions from the same user (different ads,
     separate DB connections/threads) must not both fetch the profile vector
     before either writes back -- that's the race documented in
     docs/future_ideas.md. Asserts real mutual exclusion via a Postgres
     advisory lock, not just that the code runs without error."""
     campaign_b = Campaign(
-        advertiser_id=advertiser.id,
+        user_id=advertiser_user.id,
         headline="Second campaign for concurrency test",
         description="pytest",
         category="hardware",

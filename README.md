@@ -156,9 +156,9 @@ export TOKEN='<paste it here>'
 token covers every example below.
 
 ```bash
-# submit a campaign
+# submit a campaign -- owned by whichever account $TOKEN belongs to, no
+# separate advertiser field
 curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "advertiser_name": "Acme Plumbing Co",
   "headline": "24/7 Emergency Plumbing",
   "description": "Licensed plumbers near you. Free estimates.",
   "category": "home_repair",

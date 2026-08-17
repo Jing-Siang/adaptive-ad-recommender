@@ -3,13 +3,12 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Advertiser, Campaign
+from app.models import Campaign
 from tests.conftest import auth_header
 
 client = TestClient(app)
 
 _BASE_PAYLOAD = {
-    "advertiser_name": "pytest Advertiser",
     "headline": "pytest headline",
     "description": "pytest description",
     "category": "hardware",
@@ -20,50 +19,45 @@ _BASE_PAYLOAD = {
 }
 
 
-def _cleanup(db, campaign_ids: list[int], advertiser_name: str) -> None:
+def _cleanup(db, campaign_ids: list[int]) -> None:
     for cid in campaign_ids:
         c = db.get(Campaign, cid)
         if c:
             db.delete(c)
     db.commit()
-    adv = db.query(Advertiser).filter_by(name=advertiser_name).first()
-    if adv:
-        db.delete(adv)
-        db.commit()
 
 
 @patch("app.campaigns.api.campaign_review_queue")
 def test_create_campaign_returns_pending_review_and_enqueues_job(mock_queue, db, advertiser_user):
-    resp = client.post(
-        "/campaigns",
-        json={**_BASE_PAYLOAD, "advertiser_name": "pytest Advertiser A"},
-        headers=auth_header(advertiser_user),
-    )
+    resp = client.post("/campaigns", json=_BASE_PAYLOAD, headers=auth_header(advertiser_user))
 
     try:
         assert resp.status_code == 201
         data = resp.json()
         assert data["status"] == "pending_review"
         assert data["budget_spent"] == 0.0
+        assert data["user_id"] == advertiser_user.id
 
         mock_queue.enqueue.assert_called_once()
         _, enqueued_campaign_id = mock_queue.enqueue.call_args[0]
         assert enqueued_campaign_id == data["id"]
     finally:
-        _cleanup(db, [resp.json()["id"]], "pytest Advertiser A")
+        _cleanup(db, [resp.json()["id"]])
 
 
 @patch("app.campaigns.api.campaign_review_queue")
-def test_create_campaign_reuses_existing_advertiser_by_name(mock_queue, db, advertiser_user):
-    payload = {**_BASE_PAYLOAD, "advertiser_name": "pytest Advertiser B"}
-    headers = auth_header(advertiser_user)
-    resp1 = client.post("/campaigns", json=payload, headers=headers)
-    resp2 = client.post("/campaigns", json={**payload, "headline": "second campaign"}, headers=headers)
+def test_create_campaign_attributes_each_submission_to_its_own_account(mock_queue, db, advertiser_user, moderator_user):
+    """No Advertiser entity to dedupe through anymore -- every submission is
+    attributed to whichever account's token made the request, independent
+    of any other submission (see docs/auth_plan.md)."""
+    resp1 = client.post("/campaigns", json=_BASE_PAYLOAD, headers=auth_header(advertiser_user))
+    resp2 = client.post("/campaigns", json=_BASE_PAYLOAD, headers=auth_header(moderator_user))
 
     try:
-        assert resp1.json()["advertiser_id"] == resp2.json()["advertiser_id"]
+        assert resp1.json()["user_id"] == advertiser_user.id
+        assert resp2.json()["user_id"] == moderator_user.id
     finally:
-        _cleanup(db, [resp1.json()["id"], resp2.json()["id"]], "pytest Advertiser B")
+        _cleanup(db, [resp1.json()["id"], resp2.json()["id"]])
 
 
 def test_list_campaigns_filters_by_status(db, campaign):

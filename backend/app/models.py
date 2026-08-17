@@ -60,20 +60,16 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Advertiser(Base):
-    __tablename__ = "advertisers"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(200))
-
-    campaigns: Mapped[list["Campaign"]] = relationship(back_populates="advertiser")
-
-
 class Campaign(Base):
     __tablename__ = "campaigns"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    advertiser_id: Mapped[int] = mapped_column(ForeignKey("advertisers.id"))
+    # The submitting account -- a User with role="advertiser" (or
+    # "moderator", which is a superset). No separate Advertiser entity:
+    # the "advertiser name" a campaign is attributed to is just that
+    # account's User.display_name, not a distinct business-name field
+    # (see docs/auth_plan.md).
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Creative
     headline: Mapped[str] = mapped_column(String(200))
@@ -96,8 +92,6 @@ class Campaign(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    advertiser: Mapped["Advertiser"] = relationship(back_populates="campaigns")
 
 
 class Event(Base):

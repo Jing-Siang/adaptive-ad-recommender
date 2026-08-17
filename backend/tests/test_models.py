@@ -3,11 +3,11 @@ from datetime import date
 from app.models import Campaign
 
 
-def test_campaign_defaults(db, advertiser):
+def test_campaign_defaults(db, advertiser_user):
     """A Campaign built without specifying status/budget_spent/excluded_categories
     should get sensible Python-side defaults, not None/errors."""
     c = Campaign(
-        advertiser_id=advertiser.id,
+        user_id=advertiser_user.id,
         headline="Defaults Test",
         description="checking Python-side column defaults",
         category="hardware",
@@ -33,23 +33,12 @@ def test_campaign_defaults(db, advertiser):
         db.commit()
 
 
-def test_advertiser_campaigns_relationship(db, advertiser, campaign):
-    """advertiser.campaigns should reflect campaigns linked via advertiser_id,
-    and campaign.advertiser should navigate back -- see conversation notes on
-    relationship()/back_populates."""
-    db.refresh(advertiser)
-
-    assert campaign in advertiser.campaigns
-    assert campaign.advertiser.id == advertiser.id
-    assert campaign.advertiser.name == advertiser.name
-
-
-def test_campaign_excluded_categories_round_trips_as_list(db, advertiser):
+def test_campaign_excluded_categories_round_trips_as_list(db, advertiser_user):
     """excluded_categories uses Postgres ARRAY(String) -- confirm it actually
     round-trips as a real Python list, not a string or something SQLite-shaped
     (this project deliberately doesn't support SQLite, see conversation notes)."""
     c = Campaign(
-        advertiser_id=advertiser.id,
+        user_id=advertiser_user.id,
         headline="Array Test",
         description="checking ARRAY(String) round-trip",
         category="alcohol",

@@ -47,10 +47,12 @@ a self-service request/approval flow would be over-engineering.
 - **`end_user`** (default on first login) -- onboarding, feed, reactions,
   own profile. Matches the existing "consumer" persona (View 1).
 - **`advertiser`** -- everything above, plus submit campaigns (View 3) and
-  view the performance dashboard (View 2). No per-advertiser data scoping
-  in this phase -- `Campaign`/`Advertiser` aren't linked to a `User` yet;
-  narrowing "see only your own campaigns" is a real follow-on, out of
-  scope here to keep this bounded.
+  view the performance dashboard (View 2). `Campaign.user_id` points
+  straight at the submitting account (Phase 5 below) -- no separate
+  Advertiser entity. Still no per-advertiser *visibility* scoping,
+  though: `GET /campaigns` shows every advertiser's campaigns to every
+  advertiser, not just their own; that's a real follow-on, out of scope
+  here to keep this bounded.
 - **`moderator`** -- everything above, plus `POST /campaigns/{id}/moderate`
   (View 4).
 
@@ -187,6 +189,30 @@ independent of the rest of the migration below.
       Frontend's reset button calls `resetProfile()` instead of
       generating a new UUID, then forces `OnboardingChat` to remount
       (a `key` bump) so its local chat state clears too.
+
+## Phase 5 -- drop Advertiser, Campaign.user_id -> User directly
+
+- [x] Removed the `Advertiser` table entirely (migration `bed5a742999d`)
+      instead of linking it to `User` -- it predated the whole auth build
+      as the *only* identity concept in the system (find-or-create by a
+      free-text `advertiser_name` string, no verification at all: any
+      caller could submit a campaign under any other advertiser's name).
+      Once real accounts existed, keeping it as a second, separate
+      identity layer alongside `User` was redundant, not a feature --
+      there's no legitimate case in this app for an advertiser's business
+      name to differ from their Google account's `display_name`.
+      `Campaign.user_id` (`FK -> users.id`) now points straight at the
+      submitting account. Pre-existing dev-only `Campaign` rows (mostly
+      the 288-campaign seed catalog + pytest artifacts, no real owner to
+      recover) were backfilled to whichever `User` row happened to exist
+      at migration time, same call as the `onboarding_completed` and
+      `reactions.user_id` migrations before it.
+      `CampaignCreateRequest` dropped `advertiser_name` entirely; the
+      frontend's campaign form no longer asks for one.
+- [ ] **Still not done, deliberately out of scope for this phase**:
+      per-advertiser *visibility* scoping. `GET /campaigns` still returns
+      every campaign regardless of who's asking -- an `advertiser`
+      account sees other advertisers' campaigns too, not just their own.
 
 ## Verification
 

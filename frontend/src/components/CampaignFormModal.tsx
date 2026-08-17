@@ -1,10 +1,7 @@
 import { useState, type SubmitEvent } from 'react'
 import { createCampaign } from '../api'
 
-const DEFAULT_ADVERTISER = 'Demo Advertiser'
-
 const EMPTY_FORM = {
-  advertiser_name: DEFAULT_ADVERTISER,
   headline: '',
   description: '',
   category: '',
@@ -29,7 +26,6 @@ export function CampaignFormModal({ onCreated, onClose }: { onCreated: () => voi
     setError(null)
     try {
       await createCampaign({
-        advertiser_name: form.advertiser_name,
         headline: form.headline,
         description: form.description,
         category: form.category,
@@ -59,15 +55,6 @@ export function CampaignFormModal({ onCreated, onClose }: { onCreated: () => voi
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-            Advertiser name
-            <input
-              required
-              value={form.advertiser_name}
-              onChange={(e) => update('advertiser_name', e.target.value)}
-              className={inputClass}
-            />
-          </label>
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
             Headline
             <input
