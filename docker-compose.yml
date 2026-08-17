@@ -25,6 +25,25 @@ services:
     ports:
       - "6379:6379"
 
+  # Web GUI for browsing Postgres -- opt-in, see `make pgadmin` (not started
+  # by `make infra`, matching the Kafka services below). servers.json
+  # pre-registers the postgres service so it shows up in the sidebar
+  # without manually re-entering host/port/db each time; the password
+  # still has to be typed on first connect (see `make pgadmin`'s output).
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    volumes:
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
   # --- Kafka + Debezium CDC (opt-in, see `make kafka`) -----------------------
   # Syncs campaigns table eligibility (status/budget) into Pinecone -- see
   # docs/kafka_cdc_plan.md for the full design. Not started by `make infra`;
@@ -140,3 +159,4 @@ services:
 volumes:
   postgres_data:
   kafka_data:
+  pgadmin_data:

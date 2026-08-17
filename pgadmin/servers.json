@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "adaptive-ad-recommender",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "ad_recommender",
+      "Username": "ad_recommender",
+      "SSLMode": "prefer"
+    }
+  }
+}

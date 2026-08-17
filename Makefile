@@ -1,6 +1,6 @@
 .PHONY: help install install-backend install-frontend infra infra-down migrate \
 	backend worker frontend seed test test-integration docker-up docker-down \
-	kafka kafka-down kafka-register-connector kafka-consumer
+	kafka kafka-down kafka-register-connector kafka-consumer pgadmin pgadmin-down
 
 help:
 	@echo "adaptive-ad-recommender -- common dev commands"
@@ -22,6 +22,9 @@ help:
 	@echo "  make kafka-down                 Stop Kafka + Connect"
 	@echo "  make kafka-register-connector   Create the compacted topic + DLQ topic, register the Debezium connector (safe to re-run)"
 	@echo "  make kafka-consumer             Run the Pinecone campaign sync consumer -- keep running in its own terminal"
+	@echo ""
+	@echo "  make pgadmin        Start pgAdmin (Postgres web GUI) -- http://localhost:5050, admin@example.com / admin"
+	@echo "  make pgadmin-down   Stop pgAdmin"
 	@echo ""
 	@echo "Typical flow: make infra, then make backend / make worker / make frontend in three terminals."
 	@echo "For Kafka/CDC work, also run: make kafka && make kafka-register-connector && make kafka-consumer"
@@ -98,3 +101,11 @@ kafka-register-connector:
 
 kafka-consumer:
 	cd backend && . .venv/bin/activate && python -m app.campaigns.pinecone_sync_consumer
+
+pgadmin:
+	docker compose up -d pgadmin
+	@echo "pgAdmin: http://localhost:5050  (login: admin@example.com / admin)"
+	@echo "The 'adaptive-ad-recommender' server is pre-registered -- when it prompts for a password, use: ad_recommender"
+
+pgadmin-down:
+	docker compose stop pgadmin
