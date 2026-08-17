@@ -22,6 +22,26 @@ def _fake_stream(deltas):
     return [SimpleNamespace(type="response.output_text.delta", delta=d) for d in deltas]
 
 
+def test_complete_onboarding_sets_the_flag(db, user):
+    """POST /onboarding/complete is the "actually finished" signal -- not
+    the same moment a profile vector first gets seeded (see
+    test_checkpoint_seeds_profile_on_first_show_candidates below, which
+    happens much earlier, on just the first show_candidates round)."""
+    assert user.onboarding_completed is False
+
+    resp = client.post("/onboarding/complete", headers=auth_header(user))
+
+    assert resp.status_code == 200
+    assert resp.json()["onboarding_completed"] is True
+    db.refresh(user)
+    assert user.onboarding_completed is True
+
+
+def test_complete_onboarding_requires_auth():
+    resp = client.post("/onboarding/complete")
+    assert resp.status_code == 401
+
+
 @patch("app.serving.onboarding_api.retrieve_candidates", return_value=[])
 @patch("app.serving.onboarding_api.upsert_vector")
 @patch("app.serving.onboarding_api.embed_query")

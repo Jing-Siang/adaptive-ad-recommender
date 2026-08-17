@@ -10,6 +10,7 @@ export interface Account {
   display_name: string
   avatar_url: string | null
   role: Role
+  onboarding_completed: boolean
 }
 
 // --------------------------------------------------------------------------

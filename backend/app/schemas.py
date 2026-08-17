@@ -48,6 +48,7 @@ class AccountResponse(BaseModel):
     display_name: str
     avatar_url: str | None
     role: str
+    onboarding_completed: bool
 
 
 class AuthTokenResponse(BaseModel):

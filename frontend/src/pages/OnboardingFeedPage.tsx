@@ -1,35 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { RotateCcw } from 'lucide-react'
-import { getUser, resetProfile } from '../api'
+import { completeOnboarding, fetchMe, resetProfile } from '../api'
+import { useAuth } from '../contexts/AuthContext'
 import { OnboardingChat } from '../components/OnboardingChat'
 import { Feed } from '../components/Feed'
-import { Spinner } from '../components/Spinner'
 
 export function OnboardingFeedPage() {
-  const [mode, setMode] = useState<'onboarding' | 'feed' | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { user, updateUser } = useAuth()
+  // user.onboarding_completed, not "does a profile vector exist" --
+  // a profile vector gets seeded much earlier, on the first onboarding
+  // checkpoint round that shows candidates, so using that instead would
+  // route a mid-conversation reload straight to the feed (see
+  // docs/auth_plan.md and app/serving/onboarding_api.py's /complete route).
+  const [mode, setMode] = useState<'onboarding' | 'feed'>(user?.onboarding_completed ? 'feed' : 'onboarding')
   const [chatKey, setChatKey] = useState(0)
 
-  useEffect(() => {
-    // GET /users/me 404s until the first onboarding checkpoint seeds a
-    // profile vector -- that's the whole signal for "has this account been
-    // through onboarding before," no separate progress tracking needed
-    // (see docs/auth_plan.md). Any other failure (network, 500) is a real
-    // error, not "no profile yet" -- surfaced instead of silently sending
-    // an existing account back through onboarding.
-    getUser()
-      .then(() => setMode('feed'))
-      .catch((err) => {
-        if (err instanceof Error && err.message.includes('404')) {
-          setMode('onboarding')
-        } else {
-          setError(err instanceof Error ? err.message : String(err))
-        }
-      })
-  }, [])
+  // App.tsx never renders this page without a logged-in user.
+  if (!user) return null
+
+  async function handleFinish() {
+    const updated = await completeOnboarding()
+    updateUser(updated)
+    setMode('feed')
+  }
 
   async function handleReset() {
     await resetProfile()
+    const updated = await fetchMe()
+    updateUser(updated)
     setChatKey((k) => k + 1)
     setMode('onboarding')
   }
@@ -52,17 +50,7 @@ export function OnboardingFeedPage() {
         <div className="pointer-events-none h-6 bg-gradient-to-b from-stone-50 to-transparent dark:from-stone-900" />
       </div>
       <div className="flex flex-1 flex-col">
-        {error ? (
-          <p className="p-6 text-sm text-red-600 dark:text-red-400">{error}</p>
-        ) : mode === null ? (
-          <div className="flex flex-1 items-center justify-center">
-            <Spinner label="Loading" />
-          </div>
-        ) : mode === 'onboarding' ? (
-          <OnboardingChat key={chatKey} onFinish={() => setMode('feed')} />
-        ) : (
-          <Feed />
-        )}
+        {mode === 'onboarding' ? <OnboardingChat key={chatKey} onFinish={handleFinish} /> : <Feed />}
       </div>
     </div>
   )

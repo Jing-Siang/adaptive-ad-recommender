@@ -82,6 +82,7 @@ def test_reset_deletes_profile_vector_and_reactions(mock_delete_vector, db, user
     from app.models import Reaction
 
     db.add(Reaction(user_id=user.id, campaign_id=campaign.id, reaction="like"))
+    user.onboarding_completed = True
     db.commit()
 
     resp = client.post("/users/me/reset", headers=auth_header(user))
@@ -89,6 +90,8 @@ def test_reset_deletes_profile_vector_and_reactions(mock_delete_vector, db, user
     assert resp.status_code == 204
     mock_delete_vector.assert_called_once_with(str(user.id), namespace="users")
     assert db.query(Reaction).filter_by(user_id=user.id).count() == 0
+    db.refresh(user)
+    assert user.onboarding_completed is False
 
 
 @patch("app.serving.users.delete_vector")

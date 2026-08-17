@@ -140,11 +140,22 @@ independent of the rest of the migration below.
 - [x] `OnboardingFeedPage.tsx`: drop the `crypto.randomUUID()`-per-session
       pattern -- `userId` now comes from `useAuth().user.id` implicitly
       (the backend derives it from the token, so the page no longer
-      needs to hold or pass it at all). On mount, `GET /users/me` decides
-      the initial view: 404 means "no profile yet" -> onboarding, any
-      other success -> straight to feed. `OnboardingChat`/`Feed`/
+      needs to hold or pass it at all). `OnboardingChat`/`Feed`/
       `FeedCard` had their `userId` prop dropped entirely (pure pass-
       through, no longer needed).
+- [x] **Onboarding-vs-feed signal, revised**: initially decided via
+      `GET /users/me` (profile-vector existence), then corrected -- a
+      profile vector gets seeded much earlier than "done," on the first
+      `onboarding_checkpoint` round that returns `show_candidates=True`
+      (often after just one message). Using vector-existence would send a
+      mid-conversation reload straight to the feed. Added a real
+      `User.onboarding_completed` column (migration
+      `c835b6e52c74`) plus `POST /onboarding/complete`, called only when
+      the user actually clicks "Continue to your feed" -- that flag,
+      returned on `Account`/`GET /auth/me`, is now the actual signal.
+      `POST /users/me/reset` also flips it back to `False`. `AuthContext`
+      gained `updateUser()` so the frontend can sync this flag locally
+      right after finishing/resetting, without a full page reload.
 - [x] **"Restart onboarding," kept and fixed, not removed.** Once
       `user_id` is a real account, it can no longer mean "become a new
       anonymous guest." New `POST /users/me/reset` (`app/serving/users.py`,

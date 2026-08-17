@@ -190,6 +190,14 @@ export function onboardingCheckpoint(messages: ChatMessage[]): Promise<Onboardin
   })
 }
 
+/** Marks the account as having actually finished onboarding -- distinct
+ * from "has a profile vector," which gets seeded much earlier (see the
+ * backend endpoint's docstring). Returns the updated account so callers
+ * can sync AuthContext without a second round trip. */
+export function completeOnboarding(): Promise<Account> {
+  return request('/onboarding/complete', { method: 'POST' })
+}
+
 /**
  * Streams the onboarding chat reply, calling onDelta with each text chunk as
  * it arrives. readyToFinish tells the model to wrap up and guide the user to

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import ARRAY, Boolean, DateTime, Float, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -50,6 +50,13 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(200))
     avatar_url: Mapped[str | None] = mapped_column(String(500), default=None)
     role: Mapped[str] = mapped_column(String(20), default="end_user")
+    # True only once the user actually finishes onboarding (clicks "Continue
+    # to your feed") -- NOT the same as "has a profile vector in Pinecone",
+    # which gets seeded much earlier, on the first onboarding_checkpoint
+    # round that decides to show candidates. Using vector-existence for this
+    # would route a mid-conversation reload straight to the feed instead of
+    # back into onboarding (see docs/auth_plan.md).
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

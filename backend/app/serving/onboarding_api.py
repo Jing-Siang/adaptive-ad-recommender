@@ -11,7 +11,9 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.embeddings import embed_query
 from app.core.vector_store import fetch_vector, upsert_vector
+from app.models import User
 from app.schemas import (
+    AccountResponse,
     CheckpointJudgment,
     CurrentUser,
     OnboardingChatRequest,
@@ -141,6 +143,24 @@ def _judge_checkpoint(messages: list[dict]) -> CheckpointJudgment:
         text_format=CheckpointJudgment,
     )
     return response.output_parsed
+
+
+@router.post("/complete", response_model=AccountResponse)
+def complete_onboarding(
+    current: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)
+) -> AccountResponse:
+    """Marks the account as having actually finished onboarding (clicked
+    "Continue to your feed") -- distinct from "has a profile vector," which
+    gets seeded much earlier, on the first checkpoint round that shows
+    candidates (see onboarding_checkpoint below). The frontend uses this
+    flag, not profile-vector existence, to decide onboarding vs. feed on
+    load -- otherwise a reload mid-conversation (after just one exchange)
+    would already look "done" and skip the rest of onboarding."""
+    user = db.get(User, current.id)
+    user.onboarding_completed = True
+    db.commit()
+    db.refresh(user)
+    return AccountResponse.model_validate(user)
 
 
 @router.post("/checkpoint", response_model=OnboardingCheckpointResponse)
