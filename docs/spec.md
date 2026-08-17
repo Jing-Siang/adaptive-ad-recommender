@@ -139,13 +139,11 @@ only exist because the system runs and accumulates data over time.
    check from campaign policy review: guardrails run on every serve
    request against the live context; policy review runs once, at campaign
    creation, against the campaign's category in the abstract.
-4. **Serve** — `POST /recommend` returns a single highest-ranked,
-   guardrail-allowed candidate plus the full decision trace (candidates,
-   rankings, guardrail results, what was actually served); `POST
-   /recommend/batch` returns up to `batch_size` ranked, guardrail-allowed
-   ads in one call, for the feed. Impressions are logged separately (next
-   step) once an item actually scrolls into view — a batch being fetched
-   isn't the same as every item in it having been seen.
+4. **Serve** — `POST /recommend/batch` returns up to `batch_size` ranked,
+   guardrail-allowed ads in one call, for the feed. Impressions are logged
+   separately (next step) once an item actually scrolls into view — a
+   batch being fetched isn't the same as every item in it having been
+   seen.
 5. **Events** (`serving/events_api.py`) — every impression and reaction is
    logged to a Postgres `events` table (the real history; Pinecone only
    ever holds current state, not a timeline):

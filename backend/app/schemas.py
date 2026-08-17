@@ -130,26 +130,6 @@ class GuardrailResult(BaseModel):
     reason: str | None = None
 
 
-class RecommendationRequest(BaseModel):
-    """Request body for POST /recommend. user_id comes from the
-    authenticated account, not a request field (see docs/auth_plan.md)."""
-
-    top_k: int = 10
-
-
-class RecommendationTrace(BaseModel):
-    """Full decision trace returned by POST /recommend — every candidate,
-    every ranking, every guardrail check, and which ad (if any) actually
-    got served. This is the "explainability" artifact: enough to answer
-    "why was this ad chosen" after the fact."""
-
-    user_id: str
-    candidates: list[AdCandidate]
-    rankings: list[RankedAd]
-    guardrail_results: list[GuardrailResult]
-    served_ad_id: str | None
-
-
 class FeedItem(AdCandidate):
     """One ad in a batch-recommend response: an AdCandidate (content +
     similarity_score) plus its LLM re-rank result -- enough to render the

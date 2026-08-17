@@ -5,10 +5,10 @@ or silently re-litigated later.
 
 ## Escalation agent (serving side)
 
-After `POST /recommend` serves a decision, an agent reviews the decision
-trace (candidates, guardrail results, what was actually served) and decides
-whether something is worth flagging to a human — e.g. a high-relevance ad
-got guardrail-blocked, or every candidate in a round got blocked. If so, it
+After `POST /recommend/batch` serves a decision, an agent reviews the
+candidates/rankings/guardrail results for that batch and decides whether
+something is worth flagging to a human — e.g. a high-relevance ad got
+guardrail-blocked, or every candidate in a round got blocked. If so, it
 calls a notification tool (Slack, or a structured log entry as a simpler
 stand-in) to alert someone.
 
