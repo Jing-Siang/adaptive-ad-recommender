@@ -9,7 +9,6 @@ import type {
   PerformanceResponse,
   Reaction,
   ReportCategory,
-  UserResponse,
 } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -163,17 +162,6 @@ export function doNotShowAgain(adId: string): Promise<void> {
 // --------------------------------------------------------------------------
 // Users / profiles
 // --------------------------------------------------------------------------
-
-export function createUser(interestSummary: string): Promise<UserResponse> {
-  return request('/users/me', {
-    method: 'POST',
-    body: JSON.stringify({ interest_summary: interestSummary }),
-  })
-}
-
-export function getUser(): Promise<UserResponse> {
-  return request('/users/me')
-}
 
 export function resetProfile(): Promise<void> {
   return request('/users/me/reset', { method: 'POST' })
