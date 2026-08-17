@@ -64,14 +64,6 @@ def list_campaigns(status: str | None = None, db: Session = Depends(get_db)) -> 
     return query.order_by(Campaign.created_at.desc()).all()
 
 
-@router.get("/{campaign_id}", response_model=CampaignResponse)
-def get_campaign(campaign_id: int, db: Session = Depends(get_db)) -> Campaign:
-    campaign = db.get(Campaign, campaign_id)
-    if campaign is None:
-        raise HTTPException(status_code=404, detail="campaign not found")
-    return campaign
-
-
 @router.post("/{campaign_id}/moderate", response_model=CampaignResponse)
 def moderate_campaign(
     campaign_id: int,

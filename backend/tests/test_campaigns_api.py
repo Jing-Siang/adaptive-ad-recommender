@@ -66,17 +66,6 @@ def test_create_campaign_reuses_existing_advertiser_by_name(mock_queue, db, adve
         _cleanup(db, [resp1.json()["id"], resp2.json()["id"]], "pytest Advertiser B")
 
 
-def test_get_campaign_not_found_returns_404():
-    resp = client.get("/campaigns/999999999")
-    assert resp.status_code == 404
-
-
-def test_get_campaign_returns_full_record(db, campaign):
-    resp = client.get(f"/campaigns/{campaign.id}")
-    assert resp.status_code == 200
-    assert resp.json()["headline"] == campaign.headline
-
-
 def test_list_campaigns_filters_by_status(db, campaign):
     campaign.status = "needs_review"
     db.commit()

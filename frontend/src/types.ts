@@ -44,15 +44,6 @@ export type Reaction = 'like' | 'dislike' | 'interested'
 export type ReportCategory = 'misleading' | 'offensive' | 'irrelevant' | 'spam' | 'other'
 
 // --------------------------------------------------------------------------
-// Users / profiles
-// --------------------------------------------------------------------------
-
-export interface UserResponse {
-  user_id: string
-  interest_summary: string
-}
-
-// --------------------------------------------------------------------------
 // Onboarding chat
 // --------------------------------------------------------------------------
 

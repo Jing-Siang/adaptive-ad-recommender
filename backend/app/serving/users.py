@@ -4,43 +4,12 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.db import get_db
-from app.core.embeddings import embed_query
 from app.core.logging_utils import log_event
-from app.core.vector_store import delete_vector, fetch_metadata, update_metadata, upsert_vector
+from app.core.vector_store import delete_vector, fetch_metadata, update_metadata
 from app.models import Reaction, User
-from app.schemas import CurrentUser, DoNotShowRequest, UserCreateRequest, UserResponse
+from app.schemas import CurrentUser, DoNotShowRequest
 
 router = APIRouter(prefix="/users", tags=["users"])
-
-
-@router.post("/me", response_model=UserResponse, status_code=201)
-def create_my_profile(request: UserCreateRequest, current: CurrentUser = Depends(get_current_user)) -> UserResponse:
-    """Seed the caller's starting profile vector from a free-text interest
-    summary. Called once, at the first onboarding checkpoint --
-    retrieve_candidates requires this to have already run."""
-    user_id = str(current.id)
-    vector = embed_query([request.interest_summary])[0]
-    upsert_vector(
-        user_id,
-        vector,
-        metadata={"interest_summary": request.interest_summary},
-        namespace="users",
-    )
-    log_event("user_profile_created", user_id=user_id)
-    return UserResponse(user_id=user_id, interest_summary=request.interest_summary)
-
-
-@router.get("/me", response_model=UserResponse)
-def get_my_profile(current: CurrentUser = Depends(get_current_user)) -> UserResponse:
-    """404 means "no profile yet" -- the frontend uses this to decide
-    whether to show onboarding or go straight to the feed on load/restart
-    (see docs/auth_plan.md; a lighter check than tracking onboarding
-    progress itself, which turned out unnecessary)."""
-    user_id = str(current.id)
-    metadata = fetch_metadata(user_id, namespace="users")
-    if metadata is None:
-        raise HTTPException(status_code=404, detail="no profile found")
-    return UserResponse(user_id=user_id, interest_summary=metadata.get("interest_summary", ""))
 
 
 @router.post("/me/do-not-show", status_code=204)

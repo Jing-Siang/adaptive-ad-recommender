@@ -86,25 +86,6 @@ class AdCandidate(Ad):
     similarity_score: float
 
 
-class UserCreateRequest(BaseModel):
-    """Request body for POST /users/me. Seeds the caller's starting profile
-    vector from a free-text interest summary -- called once, at the first
-    onboarding checkpoint (see app/serving/users.py). user_id comes from the
-    authenticated account (see docs/auth_plan.md), not a request field."""
-
-    interest_summary: str
-
-
-class UserResponse(BaseModel):
-    """Read model for a user's profile -- returned by both POST /users and
-    GET /users/{user_id}. Deliberately excludes the raw profile_vector
-    (an internal Pinecone implementation detail, not meaningful for
-    display or worth the payload size)."""
-
-    user_id: str
-    interest_summary: str
-
-
 class RankedAd(BaseModel):
     """One candidate's LLM-assigned relevance, after re-ranking. This is
     the structured output ranking.py asks the LLM for — one per candidate."""
