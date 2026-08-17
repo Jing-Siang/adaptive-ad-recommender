@@ -33,7 +33,7 @@ function describeReactions(candidates: AdCandidate[], reactions: Record<string, 
   return `(I ${entries.join(', ')}.)`
 }
 
-export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish: () => void }) {
+export function OnboardingChat({ onFinish }: { onFinish: () => void }) {
   const [apiMessages, setApiMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: OPENING_MESSAGE }])
   const [displayTurns, setDisplayTurns] = useState<DisplayTurn[]>([{ role: 'assistant', content: OPENING_MESSAGE }])
   const [lastCandidates, setLastCandidates] = useState<AdCandidate[]>([])
@@ -87,9 +87,9 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
       if (isUnchecking) {
         // Reverses the nudge/debit server-side too, not just the local
         // highlight (see events_api.unreact / feedback.clear_feedback).
-        await clearReaction(userId, adId)
+        await clearReaction(adId)
       } else {
-        await sendReaction(userId, adId, reaction)
+        await sendReaction(adId, reaction)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -128,7 +128,7 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
     setStreamingText('')
 
     try {
-      const checkpoint = await onboardingCheckpoint(userId, newMessages)
+      const checkpoint = await onboardingCheckpoint(newMessages)
 
       // MAX_CHECKPOINT_ROUNDS is a client-only safety net -- the backend
       // has no concept of it, so checkpoint.ready_to_finish alone can't
@@ -167,7 +167,7 @@ export function OnboardingChat({ userId, onFinish }: { userId: string; onFinish:
         setLastCandidates(checkpoint.candidates)
         setCheckpointRounds((n) => n + 1)
         checkpoint.candidates.forEach((c) => {
-          logImpression(userId, c.ad_id).catch(() => {})
+          logImpression(c.ad_id).catch(() => {})
         })
       }
       setReadyToFinish(readyToFinish)

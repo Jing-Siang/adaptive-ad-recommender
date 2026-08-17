@@ -7,11 +7,9 @@ import { ReportModal } from './ReportModal'
 
 export function FeedCard({
   item,
-  userId,
   onHidden,
 }: {
   item: FeedItem
-  userId: string
   onHidden: (adId: string) => void
 }) {
   const [reaction, setReaction] = useState<Reaction | null>(null)
@@ -28,14 +26,14 @@ export function FeedCard({
       ([entry]) => {
         if (entry.isIntersecting && !impressionLogged.current) {
           impressionLogged.current = true
-          logImpression(userId, item.ad_id).catch(() => {})
+          logImpression(item.ad_id).catch(() => {})
         }
       },
       { threshold: 0.5 },
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [userId, item.ad_id])
+  }, [item.ad_id])
 
   async function handleReact(r: Reaction) {
     if (reaction === r) {
@@ -44,7 +42,7 @@ export function FeedCard({
       // events_api.unreact / feedback.clear_feedback).
       setReaction(null)
       try {
-        await clearReaction(userId, item.ad_id)
+        await clearReaction(item.ad_id)
       } catch {
         // best-effort; reaction UI state already reflects the attempt
       }
@@ -52,7 +50,7 @@ export function FeedCard({
     }
     setReaction(r)
     try {
-      await sendReaction(userId, item.ad_id, r)
+      await sendReaction(item.ad_id, r)
     } catch {
       // best-effort; reaction UI state already reflects the attempt
     }
@@ -60,7 +58,7 @@ export function FeedCard({
 
   async function handleReport(category: ReportCategory, reason?: string) {
     try {
-      await sendReport(userId, item.ad_id, category, reason)
+      await sendReport(item.ad_id, category, reason)
     } finally {
       setShowReport(false)
       setReported(true)
@@ -69,7 +67,7 @@ export function FeedCard({
 
   async function handleDoNotShow() {
     try {
-      await doNotShowAgain(userId, item.ad_id)
+      await doNotShowAgain(item.ad_id)
     } finally {
       onHidden(item.ad_id)
     }

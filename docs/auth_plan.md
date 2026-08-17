@@ -124,7 +124,7 @@ independent of the rest of the migration below.
 
 ## Phase 4 -- migrate remaining endpoints + fix restart-onboarding
 
-- [ ] `events_api.py`, `onboarding_api.py`, `serving/api.py`,
+- [x] `events_api.py`, `onboarding_api.py`, `serving/api.py`,
       `serving/users.py`: add `Depends(get_current_user)`, remove
       `user_id` from the request schemas (`ImpressionRequest`,
       `ReactionRequest`, `ReactionClearRequest`, `ReportRequest`,
@@ -132,13 +132,20 @@ independent of the rest of the migration below.
       `OnboardingChatRequest`, `OnboardingCheckpointRequest`,
       `UserCreateRequest`), use the authenticated user's id instead of
       the client-supplied field.
-- [ ] `src/api.ts`: remove the `userId` parameter from every function
+- [x] `src/api.ts`: remove the `userId` parameter from every function
       that currently takes one explicitly (`sendReaction`,
-      `clearReaction`, `logImpression`, etc.).
-- [ ] `OnboardingFeedPage.tsx`: drop the `crypto.randomUUID()`-per-session
-      pattern -- `userId` now comes from `useAuth().user.id`, stable
-      across reloads.
-- [ ] **"Restart onboarding," kept and fixed, not removed.** Once
+      `clearReaction`, `logImpression`, etc.). Added `resetProfile()`
+      (`POST /users/me/reset`) and pointed `createUser`/`getUser` at
+      `/users/me` instead of a path-param user id.
+- [x] `OnboardingFeedPage.tsx`: drop the `crypto.randomUUID()`-per-session
+      pattern -- `userId` now comes from `useAuth().user.id` implicitly
+      (the backend derives it from the token, so the page no longer
+      needs to hold or pass it at all). On mount, `GET /users/me` decides
+      the initial view: 404 means "no profile yet" -> onboarding, any
+      other success -> straight to feed. `OnboardingChat`/`Feed`/
+      `FeedCard` had their `userId` prop dropped entirely (pure pass-
+      through, no longer needed).
+- [x] **"Restart onboarding," kept and fixed, not removed.** Once
       `user_id` is a real account, it can no longer mean "become a new
       anonymous guest." New `POST /users/me/reset` (`app/serving/users.py`,
       derives the user from the token, no `user_id` param -- only your
@@ -166,8 +173,9 @@ independent of the rest of the migration below.
         and un-spend an advertiser's budget.
       - `Event` stays untouched either way -- not read anywhere in the
         delta computation, purely an append-only log.
-      Frontend's reset button calls this instead of generating a new
-      UUID, then clears local chat state the same way it does today.
+      Frontend's reset button calls `resetProfile()` instead of
+      generating a new UUID, then forces `OnboardingChat` to remount
+      (a `key` bump) so its local chat state clears too.
 
 ## Verification
 

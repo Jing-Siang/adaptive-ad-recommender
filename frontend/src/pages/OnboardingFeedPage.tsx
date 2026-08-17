@@ -1,18 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
+import { getUser, resetProfile } from '../api'
 import { OnboardingChat } from '../components/OnboardingChat'
 import { Feed } from '../components/Feed'
-
-function newUserId(): string {
-  return crypto.randomUUID()
-}
+import { Spinner } from '../components/Spinner'
 
 export function OnboardingFeedPage() {
-  const [userId, setUserId] = useState(newUserId)
-  const [mode, setMode] = useState<'onboarding' | 'feed'>('onboarding')
+  const [mode, setMode] = useState<'onboarding' | 'feed' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [chatKey, setChatKey] = useState(0)
 
-  function handleReset() {
-    setUserId(newUserId())
+  useEffect(() => {
+    // GET /users/me 404s until the first onboarding checkpoint seeds a
+    // profile vector -- that's the whole signal for "has this account been
+    // through onboarding before," no separate progress tracking needed
+    // (see docs/auth_plan.md). Any other failure (network, 500) is a real
+    // error, not "no profile yet" -- surfaced instead of silently sending
+    // an existing account back through onboarding.
+    getUser()
+      .then(() => setMode('feed'))
+      .catch((err) => {
+        if (err instanceof Error && err.message.includes('404')) {
+          setMode('onboarding')
+        } else {
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      })
+  }, [])
+
+  async function handleReset() {
+    await resetProfile()
+    setChatKey((k) => k + 1)
     setMode('onboarding')
   }
 
@@ -34,10 +52,16 @@ export function OnboardingFeedPage() {
         <div className="pointer-events-none h-6 bg-gradient-to-b from-stone-50 to-transparent dark:from-stone-900" />
       </div>
       <div className="flex flex-1 flex-col">
-        {mode === 'onboarding' ? (
-          <OnboardingChat userId={userId} onFinish={() => setMode('feed')} />
+        {error ? (
+          <p className="p-6 text-sm text-red-600 dark:text-red-400">{error}</p>
+        ) : mode === null ? (
+          <div className="flex flex-1 items-center justify-center">
+            <Spinner label="Loading" />
+          </div>
+        ) : mode === 'onboarding' ? (
+          <OnboardingChat key={chatKey} onFinish={() => setMode('feed')} />
         ) : (
-          <Feed userId={userId} />
+          <Feed />
         )}
       </div>
     </div>

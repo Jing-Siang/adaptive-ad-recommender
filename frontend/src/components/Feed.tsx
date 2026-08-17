@@ -9,7 +9,7 @@ import { Spinner } from './Spinner'
 // total re-rank calls per scroll session.
 const BATCH_SIZE = 50
 
-export function Feed({ userId }: { userId: string }) {
+export function Feed() {
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +22,7 @@ export function Feed({ userId }: { userId: string }) {
     loadingRef.current = true
     setLoading(true)
     try {
-      const batch = await fetchRecommendationBatch(userId, BATCH_SIZE)
+      const batch = await fetchRecommendationBatch(BATCH_SIZE)
       setItems((prev) => {
         const seen = new Set(prev.map((i) => i.ad_id))
         return [...prev, ...batch.items.filter((i) => !seen.has(i.ad_id))]
@@ -40,7 +40,7 @@ export function Feed({ userId }: { userId: string }) {
       setLoading(false)
       loadingRef.current = false
     }
-  }, [userId, exhausted])
+  }, [exhausted])
 
   useEffect(() => {
     loadMore()
@@ -90,7 +90,7 @@ export function Feed({ userId }: { userId: string }) {
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-6">
       {items.map((item) => (
-        <FeedCard key={item.ad_id} item={item} userId={userId} onHidden={hideItem} />
+        <FeedCard key={item.ad_id} item={item} onHidden={hideItem} />
       ))}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {!exhausted && <div ref={sentinelRef} className="h-0" />}

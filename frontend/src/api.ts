@@ -118,43 +118,43 @@ export function fetchMe(): Promise<Account> {
 // Serving: ads, feed, reactions
 // --------------------------------------------------------------------------
 
-export function fetchRecommendationBatch(userId: string, batchSize = 10): Promise<BatchRecommendationResponse> {
+export function fetchRecommendationBatch(batchSize = 10): Promise<BatchRecommendationResponse> {
   return request('/recommend/batch', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, batch_size: batchSize }),
+    body: JSON.stringify({ batch_size: batchSize }),
   })
 }
 
-export function logImpression(userId: string, adId: string): Promise<void> {
+export function logImpression(adId: string): Promise<void> {
   return request('/events/impression', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, ad_id: adId }),
+    body: JSON.stringify({ ad_id: adId }),
   })
 }
 
-export function sendReaction(userId: string, adId: string, reaction: Reaction): Promise<void> {
+export function sendReaction(adId: string, reaction: Reaction): Promise<void> {
   return request('/events/reaction', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, ad_id: adId, reaction }),
+    body: JSON.stringify({ ad_id: adId, reaction }),
   })
 }
 
-export function clearReaction(userId: string, adId: string): Promise<void> {
+export function clearReaction(adId: string): Promise<void> {
   return request('/events/reaction', {
     method: 'DELETE',
-    body: JSON.stringify({ user_id: userId, ad_id: adId }),
+    body: JSON.stringify({ ad_id: adId }),
   })
 }
 
-export function sendReport(userId: string, adId: string, category: ReportCategory, reason?: string): Promise<void> {
+export function sendReport(adId: string, category: ReportCategory, reason?: string): Promise<void> {
   return request('/events/report', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, ad_id: adId, category, reason }),
+    body: JSON.stringify({ ad_id: adId, category, reason }),
   })
 }
 
-export function doNotShowAgain(userId: string, adId: string): Promise<void> {
-  return request(`/users/${encodeURIComponent(userId)}/do-not-show`, {
+export function doNotShowAgain(adId: string): Promise<void> {
+  return request('/users/me/do-not-show', {
     method: 'POST',
     body: JSON.stringify({ ad_id: adId }),
   })
@@ -164,25 +164,29 @@ export function doNotShowAgain(userId: string, adId: string): Promise<void> {
 // Users / profiles
 // --------------------------------------------------------------------------
 
-export function createUser(userId: string, interestSummary: string): Promise<UserResponse> {
-  return request('/users', {
+export function createUser(interestSummary: string): Promise<UserResponse> {
+  return request('/users/me', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, interest_summary: interestSummary }),
+    body: JSON.stringify({ interest_summary: interestSummary }),
   })
 }
 
-export function getUser(userId: string): Promise<UserResponse> {
-  return request(`/users/${encodeURIComponent(userId)}`)
+export function getUser(): Promise<UserResponse> {
+  return request('/users/me')
+}
+
+export function resetProfile(): Promise<void> {
+  return request('/users/me/reset', { method: 'POST' })
 }
 
 // --------------------------------------------------------------------------
 // Onboarding chat
 // --------------------------------------------------------------------------
 
-export function onboardingCheckpoint(userId: string, messages: ChatMessage[]): Promise<OnboardingCheckpointResponse> {
+export function onboardingCheckpoint(messages: ChatMessage[]): Promise<OnboardingCheckpointResponse> {
   return request('/onboarding/checkpoint', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, messages }),
+    body: JSON.stringify({ messages }),
   })
 }
 
@@ -199,9 +203,13 @@ export async function streamOnboardingChat(
   onDelta: (chunk: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+
   const response = await fetch(`${API_BASE_URL}/onboarding/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
+    credentials: 'include',
     body: JSON.stringify({ messages, ready_to_finish: readyToFinish }),
     signal,
   })
