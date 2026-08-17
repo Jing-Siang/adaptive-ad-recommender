@@ -36,5 +36,7 @@ def _call_llm(user_context: str, candidates: list[AdCandidate]) -> RankingRespon
 def rerank(user_context: str, candidates: list[AdCandidate]) -> list[RankedAd]:
     """Pass top-K candidates + user context to the LLM via OpenAI's Responses API,
     with the JSON schema enforced during generation (text_format=RankingResponse)
-    rather than parsed-and-validated after the fact."""
+    rather than parsed-and-validated after the fact. user_context must be the
+    profile's actual interest summary -- an opaque id gives the LLM nothing to
+    reason about "intent" with (see the caller in serving/api.py)."""
     return _call_llm(user_context, candidates).rankings

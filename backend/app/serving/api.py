@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.core.logging_utils import log_duration, log_event
+from app.core.vector_store import fetch_metadata
 from app.serving.guardrails import check_guardrails
 from app.serving.ranking import rerank
 from app.serving.retrieval import retrieve_candidates
@@ -39,7 +40,12 @@ def recommend_batch(
         if not candidates:
             raise HTTPException(status_code=404, detail="no candidates found for user")
 
-        rankings = rerank(user_context=user_id, candidates=candidates)
+        # The profile's interest summary, not the bare user_id -- rerank's
+        # system prompt asks the LLM to reason about the user's *intent*,
+        # which it can't do with just an opaque numeric id as "context".
+        metadata = fetch_metadata(user_id, namespace="users") or {}
+        interest_summary = metadata.get("interest_summary", "")
+        rankings = rerank(user_context=interest_summary, candidates=candidates)
         ranked_by_score = sorted(rankings, key=lambda r: r.relevance_score, reverse=True)
         candidates_by_id = {c.ad_id: c for c in candidates}
 

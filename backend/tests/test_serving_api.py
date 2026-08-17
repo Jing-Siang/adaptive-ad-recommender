@@ -26,8 +26,11 @@ def _guardrail_side_effect(ad, context_categories):
 
 @patch("app.serving.api.check_guardrails", side_effect=_guardrail_side_effect)
 @patch("app.serving.api.rerank", return_value=_RANKINGS)
+@patch("app.serving.api.fetch_metadata", return_value={"interest_summary": "loves home repair"})
 @patch("app.serving.api.retrieve_candidates", return_value=_CANDIDATES)
-def test_recommend_batch_sorts_by_relevance_and_filters_guardrail_blocked(mock_retrieve, mock_rerank, mock_guardrail, user):
+def test_recommend_batch_sorts_by_relevance_and_filters_guardrail_blocked(
+    mock_retrieve, mock_fetch_metadata, mock_rerank, mock_guardrail, user
+):
     """Batch response is sorted by relevance_score, and a higher-ranked ad
     that fails the guardrail check is dropped rather than served."""
     resp = client.post("/recommend/batch", json={"batch_size": 10}, headers=auth_header(user))
@@ -39,6 +42,8 @@ def test_recommend_batch_sorts_by_relevance_and_filters_guardrail_blocked(mock_r
     assert [item["ad_id"] for item in data["items"]] == ["1"]
     assert data["items"][0]["relevance_score"] == 0.7
     assert data["items"][0]["justification"] == "matches home repair interest"
+    # rerank must get the real interest summary, not the bare user_id
+    mock_rerank.assert_called_once_with(user_context="loves home repair", candidates=_CANDIDATES)
 
 
 @patch("app.serving.api.retrieve_candidates", side_effect=ValueError("no profile found for user 'x'"))
