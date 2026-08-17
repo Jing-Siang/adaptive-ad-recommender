@@ -6,12 +6,14 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.embeddings import embed_query
 from app.core.vector_store import fetch_vector, upsert_vector
 from app.schemas import (
     CheckpointJudgment,
+    CurrentUser,
     OnboardingChatRequest,
     OnboardingCheckpointRequest,
     OnboardingCheckpointResponse,
@@ -62,9 +64,13 @@ def _generate_finish_reply(instructions: str, input_messages: list[dict]) -> str
 
 
 @router.post("/chat")
-def onboarding_chat(request: OnboardingChatRequest) -> StreamingResponse:
+def onboarding_chat(
+    request: OnboardingChatRequest, _current: CurrentUser = Depends(get_current_user)
+) -> StreamingResponse:
     """Streamed, user-visible conversational turn. Pure conversation over
-    whatever history the client sends -- touches no DB/Pinecone state.
+    whatever history the client sends -- touches no DB/Pinecone state, so
+    user_id isn't needed for anything here; still requires auth so this
+    (OpenAI-cost-incurring) endpoint isn't open to unauthenticated callers.
     Deliberately not wrapped in @retry: a mid-stream failure can't be
     usefully retried the way a single blocking call can (the client would
     need to handle a partial response either way)."""
@@ -139,12 +145,15 @@ def _judge_checkpoint(messages: list[dict]) -> CheckpointJudgment:
 
 @router.post("/checkpoint", response_model=OnboardingCheckpointResponse)
 def onboarding_checkpoint(
-    request: OnboardingCheckpointRequest, db: Session = Depends(get_db)
+    request: OnboardingCheckpointRequest,
+    db: Session = Depends(get_db),
+    current: CurrentUser = Depends(get_current_user),
 ) -> OnboardingCheckpointResponse:
     """Non-streamed structured-output side of a turn: decides whether enough
     signal exists yet to show candidates, seeds the profile the first time
     that happens, and retrieves real candidates. Call this *before*
     /onboarding/chat so the reply can be told show_candidates for this turn."""
+    user_id = str(current.id)
     judgment = _judge_checkpoint([m.model_dump() for m in request.messages])
 
     candidates = []
@@ -152,11 +161,11 @@ def onboarding_checkpoint(
     # fresh candidate batch on the same turn onboarding is wrapping up, even
     # if the judge call still returns both flags true.
     if judgment.show_candidates and not judgment.ready_to_finish:
-        vector = fetch_vector(request.user_id, namespace="users")
+        vector = fetch_vector(user_id, namespace="users")
         if vector is None:
             vector = embed_query([judgment.interest_summary])[0]
             upsert_vector(
-                request.user_id,
+                user_id,
                 vector,
                 metadata={"interest_summary": judgment.interest_summary},
                 namespace="users",
@@ -164,7 +173,7 @@ def onboarding_checkpoint(
         # Pass the vector directly (not just the user_id) -- avoids
         # retrieve_candidates re-fetching from Pinecone right after we may
         # have just upserted it, which isn't always immediately readable.
-        candidates = retrieve_candidates(db, request.user_id, top_k=_CHECKPOINT_CANDIDATE_COUNT, vector=vector)
+        candidates = retrieve_candidates(db, user_id, top_k=_CHECKPOINT_CANDIDATE_COUNT, vector=vector)
 
     return OnboardingCheckpointResponse(
         show_candidates=judgment.show_candidates,

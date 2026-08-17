@@ -86,13 +86,11 @@ class AdCandidate(Ad):
 
 
 class UserCreateRequest(BaseModel):
-    """Request body for POST /users. Seeds a user's starting profile vector
-    from a free-text interest summary -- called once, at the first
-    onboarding checkpoint (see app/serving/users.py). No accounts/auth:
-    user_id is just a caller-supplied string, same attribution-not-
-    authentication pattern as advertiser_name."""
+    """Request body for POST /users/me. Seeds the caller's starting profile
+    vector from a free-text interest summary -- called once, at the first
+    onboarding checkpoint (see app/serving/users.py). user_id comes from the
+    authenticated account (see docs/auth_plan.md), not a request field."""
 
-    user_id: str
     interest_summary: str
 
 
@@ -132,9 +130,9 @@ class GuardrailResult(BaseModel):
 
 
 class RecommendationRequest(BaseModel):
-    """Request body for POST /recommend."""
+    """Request body for POST /recommend. user_id comes from the
+    authenticated account, not a request field (see docs/auth_plan.md)."""
 
-    user_id: str
     top_k: int = 10
 
 
@@ -165,9 +163,9 @@ class BatchRecommendationRequest(BaseModel):
     call. One embed, one Pinecone query, one LLM re-rank covering the whole
     batch, one guardrail pass; contrast with RecommendationRequest, which is
     single-item. batch_size is capped to keep a single re-rank call's cost
-    bounded."""
+    bounded. user_id comes from the authenticated account, not a request
+    field (see docs/auth_plan.md)."""
 
-    user_id: str
     batch_size: int = Field(default=10, gt=0, le=50)
 
 
@@ -183,9 +181,9 @@ class ImpressionRequest(BaseModel):
     """Request body for POST /events/impression -- fired client-side (via an
     Intersection Observer) when a feed item actually scrolls into view. Pure
     DB insert: no profile nudge, no budget debit -- this only exists so CTR/
-    engagement-rate denominators are real counts, not proxies."""
+    engagement-rate denominators are real counts, not proxies. user_id comes
+    from the authenticated account, not a request field."""
 
-    user_id: str
     ad_id: str
 
 
@@ -195,9 +193,9 @@ class ReactionRequest(BaseModel):
     ModerationRequest.outcome already works elsewhere in this app. Each
     reaction logs an event and nudges the user's profile vector;
     like/interested also debit the campaign's budget (see
-    feedback.record_feedback)."""
+    feedback.record_feedback). user_id comes from the authenticated
+    account, not a request field."""
 
-    user_id: str
     ad_id: str
     reaction: Literal["like", "dislike", "interested"]
 
@@ -205,18 +203,18 @@ class ReactionRequest(BaseModel):
 class ReactionClearRequest(BaseModel):
     """Request body for DELETE /events/reaction -- removes the user's
     current reaction to an ad entirely, reversing its nudge/debit (see
-    feedback.clear_feedback). A no-op if there was no reaction to remove."""
+    feedback.clear_feedback). A no-op if there was no reaction to remove.
+    user_id comes from the authenticated account, not a request field."""
 
-    user_id: str
     ad_id: str
 
 
 class ReportRequest(BaseModel):
     """Request body for POST /events/report. reason is free text, required
     only when category is 'other' -- the predefined categories are
-    self-explanatory enough not to need it."""
+    self-explanatory enough not to need it. user_id comes from the
+    authenticated account, not a request field."""
 
-    user_id: str
     ad_id: str
     category: Literal["misleading", "offensive", "irrelevant", "spam", "other"]
     reason: str | None = None
@@ -229,9 +227,9 @@ class ReportRequest(BaseModel):
 
 
 class DoNotShowRequest(BaseModel):
-    """Request body for POST /users/{user_id}/do-not-show -- a permanent
-    per-user exclusion, not a learning signal (no profile nudge, no event
-    log entry). Stored in the user's Pinecone metadata, checked during
+    """Request body for POST /users/me/do-not-show -- a permanent per-user
+    exclusion, not a learning signal (no profile nudge, no event log
+    entry). Stored in the user's Pinecone metadata, checked during
     retrieval (see retrieval.py)."""
 
     ad_id: str
@@ -278,9 +276,9 @@ class OnboardingCheckpointRequest(BaseModel):
     structured-output side of a turn. Call this *before* /onboarding/chat:
     looks at the conversation so far, decides whether there's concrete
     enough signal to show candidates yet, seeds the profile the first time
-    that happens, and pulls real candidates."""
+    that happens, and pulls real candidates. user_id comes from the
+    authenticated account, not a request field."""
 
-    user_id: str
     messages: list[ChatMessage]
 
 
