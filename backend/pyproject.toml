@@ -3,4 +3,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: needs the full Kafka/Connect stack running, excluded from the default run",
+    "adversarial: real (unmocked) LLM calls probing prompt-injection resistance, costs real API money, excluded from the default run",
 ]

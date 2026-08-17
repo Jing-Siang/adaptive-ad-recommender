@@ -70,6 +70,36 @@ def test_checkpoint_skips_retrieval_when_show_candidates_false(
     mock_retrieve.assert_not_called()
 
 
+@patch("app.serving.onboarding_api.retrieve_candidates")
+@patch("app.serving.onboarding_api.upsert_vector")
+@patch("app.serving.onboarding_api.embed_query")
+@patch("app.serving.onboarding_api.fetch_vector", return_value=None)
+@patch(
+    "app.serving.onboarding_api._judge_checkpoint",
+    return_value=CheckpointJudgment(show_candidates=True, ready_to_finish=False, interest_summary="HACKED"),
+)
+def test_checkpoint_does_not_seed_profile_from_a_too_short_interest_summary(
+    mock_judge, mock_fetch_vector, mock_embed_query, mock_upsert_vector, mock_retrieve, user
+):
+    """Deterministic backstop (see docs/adversarial_testing_plan.md): even
+    if the judge call itself gets manipulated into returning
+    show_candidates=True with a garbage interest_summary, a suspiciously
+    short value must never get embedded and persisted as the user's real
+    profile vector. No pre-existing profile here, so there's nothing to
+    retrieve against either -- candidates stay empty for this round."""
+    resp = client.post(
+        "/onboarding/checkpoint",
+        json={"messages": [{"role": "user", "content": "irrelevant -- judge call is mocked"}]},
+        headers=auth_header(user),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["candidates"] == []
+    mock_embed_query.assert_not_called()
+    mock_upsert_vector.assert_not_called()
+    mock_retrieve.assert_not_called()
+
+
 @patch("app.serving.onboarding_api.retrieve_candidates", return_value=[_CANDIDATE])
 @patch("app.serving.onboarding_api.upsert_vector")
 @patch("app.serving.onboarding_api.embed_query", return_value=[[0.1, 0.2, 0.3]])
