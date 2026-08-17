@@ -32,9 +32,10 @@ only exist because the system runs and accumulates data over time.
 | Async job queue | **Redis** + **RQ** — campaign policy review runs off the request path |
 | Tool integration | **MCP** (`langchain-mcp-adapters`) — the ad-policy document is served as an MCP resource the review agent fetches; the LLM call itself uses the OpenAI SDK directly (see docs/future_ideas.md for where an actual LangChain agent loop would fit in this project) |
 | API layer | **FastAPI** |
+| Auth | **Google OAuth** (Google Identity Services, frontend-driven) + our own **JWT access/refresh token pair** (`PyJWT`, `google-auth`) — see `docs/auth_plan.md` |
 | Reliability | `tenacity` (retries/backoff, `reraise=True` so callers see the real exception), Pydantic (structured output validation), atomic SQL updates for budget (no read-modify-write) |
 | Observability | Structured (JSON) logging of every recommendation and review decision |
-| Testing | `pytest` — 74 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
+| Testing | `pytest` — 115 tests: mockable unit tests for LLM/vector-store boundaries, real-Postgres tests for anything DB-backed |
 | Deployment | Docker Compose (postgres, redis, backend, worker, frontend) → Railway or Render for production |
 
 ---
@@ -46,12 +47,13 @@ only exist because the system runs and accumulates data over time.
   embedded and indexed. There's no bulk-ingestion script; this is
   deliberate, since a static catalog with no owning campaign/budget/review
   record would bypass the whole review and budget system.
-- **User profiles**: no accounts/login (see "Deliberate scope decisions"
-  below) — a user is just a caller-supplied `user_id` string. `POST /users`
-  seeds the starting profile vector from a free-text interest summary,
-  stored (alongside a per-user blocklist) in Pinecone's `users` namespace —
-  there's no Postgres table for this, the vector store is the only home for
-  profile state. Synthetic personas (`data/generate_personas.py`) generate
+- **User profiles**: real accounts — Google OAuth + JWT, `user_id` is the
+  authenticated account's id, never a client-supplied field (see
+  `docs/auth_plan.md`). The profile *vector* is still Pinecone-only, no
+  Postgres table for it: the first `/onboarding/checkpoint` round that
+  decides enough signal exists embeds a free-text interest summary and
+  seeds it (alongside a per-user blocklist) in Pinecone's `users`
+  namespace. Synthetic personas (`data/generate_personas.py`) generate
   demo interest summaries; they're clearly labeled as synthetic.
 - **Feedback**: like/dislike/interested reactions to a served ad update that
   user's profile vector and debit the serving campaign's budget; every
@@ -91,20 +93,23 @@ only exist because the system runs and accumulates data over time.
    - `needs_review` → surfaces in the moderator queue (`GET /campaigns?
      status=needs_review`).
 4. **Moderation** (`POST /campaigns/{id}/moderate`) — a human resolves a
-   `needs_review` campaign. No authentication (out of scope for this
-   project — see the deliberate no-login decision below); only
-   *attribution*: the moderator's name is recorded as `reviewed_by` for the
-   audit trail, without verifying who they actually are. Approval here
-   triggers the same embed-and-index step as the automated path.
+   `needs_review` campaign. Requires the `moderator` role
+   (`Depends(require_role("moderator"))`, see `docs/auth_plan.md`);
+   *attribution* is still a separate, freeform `reviewed_by` name on the
+   record, not derived from the authenticated account — a deliberate
+   choice to keep the audit-trail field decoupled from login identity.
+   Approval here triggers the same embed-and-index step as the automated
+   path.
 
 ### B. Serving — recommending an ad to a user
 
-0. **Profile creation** (`POST /users`, `serving/users.py`) — no accounts:
-   a user is just a caller-supplied `user_id` string. This embeds a
+0. **Profile seeding** (`serving/onboarding_api.py`'s `/onboarding/checkpoint`)
+   — the first checkpoint round that decides enough signal exists embeds a
    free-text interest summary and stores it (vector + summary + an empty
-   blocklist) as a new record in Pinecone's `users` namespace. Every other
-   step below requires this to have already run — there's no cold-start
-   fallback that embeds text on the fly.
+   blocklist) as a new record in Pinecone's `users` namespace, keyed by the
+   authenticated account's id. Every other step below requires this to
+   have already run — there's no cold-start fallback that embeds text on
+   the fly.
 1. **Retrieval** (`serving/retrieval.py`) — read the user's *stored* profile
    vector back out of Pinecone (never re-embeds anything at recommend time),
    query the `ads` namespace for the nearest matches (cosine similarity, no
@@ -164,9 +169,9 @@ only exist because the system runs and accumulates data over time.
      3) auto-flips the campaign to `needs_review`. Deliberately simple for
      now — see `docs/future_ideas.md` for the escalation-agent version this
      is expected to motivate.
-   - `POST /users/{user_id}/do-not-show` — a permanent per-user exclusion,
-     not a learning signal: no profile nudge, no event logged, just an
-     addition to that user's blocklist (checked in step 1).
+   - `POST /users/me/do-not-show` — a permanent per-user exclusion, not a
+     learning signal: no profile nudge, no event logged, just an addition
+     to that user's blocklist (checked in step 1).
 6. **Performance dashboard** (`GET /performance`, `serving/performance_api.py`)
    — aggregates the `events` table (plus `Campaign.budget_spent`, already
    the source of truth for spend) into overall CTR/engagement-rate/
@@ -182,8 +187,9 @@ only exist because the system runs and accumulates data over time.
      shouldn't trigger an embed/seed/retrieve call), `ready_to_finish`
      (can only be true once `show_candidates` has fired), and a
      best-effort `interest_summary`. The first time `show_candidates`
-     fires, seeds the profile (equivalent to `POST /users`); every time,
-     calls `retrieve_candidates` for a few real candidates.
+     fires, seeds the profile directly (embeds and upserts into Pinecone —
+     no separate profile-creation endpoint); every time, calls
+     `retrieve_candidates` for a few real candidates.
    - `POST /onboarding/chat` — the streamed, user-visible reply (raw
      OpenAI SDK, `response.output_text.delta` events piped through a
      `StreamingResponse`; no `@retry`, since a mid-stream failure can't be
@@ -220,17 +226,21 @@ was this campaign rejected" after the fact.
 - **No bidding/auction** — serving ranking is pure relevance (the LLM's
   job), not `bid × relevance`. Campaigns just need `active` status and
   remaining budget to be eligible.
-- **No authentication anywhere** — neither advertisers submitting campaigns
-  nor moderators resolving them have accounts/logins. Moderation keeps
-  *attribution* (a freeform name on the record) without verifying identity.
-  Consciously out of scope, not an oversight.
+- **Real authentication, added later, not skipped** — the project initially
+  shipped with no accounts (every `user_id` was a caller-supplied string,
+  campaign moderation had zero access control). That's since been closed:
+  Google OAuth + our own JWT access/refresh tokens, with role-gating
+  (`end_user` / `advertiser` / `moderator`) on the endpoints that need it —
+  see `docs/auth_plan.md` for the full design. Moderation still keeps
+  *attribution* as a separate freeform name on the record (not derived
+  from the authenticated account) alongside the real role check.
 - **MCP used for the agent-to-resource case, not human-facing** — an
   earlier design considered exposing the moderator queue itself as an MCP
   server a human would connect to via a client like Claude Desktop; this
   was rejected because MCP has no built-in auth/identity model, and a human
   taking a real approve/reject action needs one. The moderator queue is
-  instead a normal (unauthenticated, per above) API; MCP is used only where
-  it's a clean fit — the policy review agent fetching a reference document.
+  instead a normal, now-authenticated API; MCP is used only where it's a
+  clean fit — the policy review agent fetching a reference document.
 
 ---
 
@@ -243,7 +253,7 @@ was this campaign rejected" after the fact.
 backend/
 ├── app/
 │   ├── main.py                    # FastAPI entrypoint, wires all routers
-│   ├── models.py                   # SQLAlchemy: Advertiser, Campaign, Event (shared)
+│   ├── models.py                   # SQLAlchemy: User, Advertiser, Campaign, Event, Reaction (shared)
 │   ├── schemas.py                   # Pydantic schemas (shared, see its module docstring)
 │   ├── policy/
 │   │   └── ad_policy.md              # company ad policy, served via MCP
@@ -251,21 +261,23 @@ backend/
 │   │   ├── config.py                  # env-backed Settings
 │   │   ├── db.py                      # SQLAlchemy engine/session
 │   │   ├── queue.py                   # Redis connection + RQ queue
+│   │   ├── auth.py                    # JWT issue/verify, Google ID token verify, require_role
 │   │   ├── logging_utils.py           # structured JSON logging
 │   │   ├── embeddings.py              # OpenAI embeddings client
 │   │   └── vector_store.py            # generic Pinecone client + fetch/upsert/update
 │   ├── serving/                      # recommend an ad to a user
-│   │   ├── api.py                     # POST /recommend, /recommend/batch
-│   │   ├── users.py                   # POST/GET /users, do-not-show (blocklist)
+│   │   ├── auth_api.py                # POST /auth/google, /auth/refresh, /auth/logout, GET /auth/me
+│   │   ├── api.py                     # POST /recommend/batch
+│   │   ├── users.py                   # do-not-show (blocklist), reset (restart onboarding)
 │   │   ├── events_api.py              # impression/reaction/report endpoints
 │   │   ├── performance_api.py          # GET /performance dashboard aggregation
-│   │   ├── onboarding_api.py            # POST /onboarding/chat, /onboarding/checkpoint
+│   │   ├── onboarding_api.py            # POST /onboarding/chat, /checkpoint, /complete
 │   │   ├── retrieval.py               # Pinecone query + eligibility + blocklist filter
 │   │   ├── ranking.py                 # LLM re-ranking (OpenAI Responses API)
 │   │   ├── guardrails.py              # brand-safety filtering (serve-time context)
 │   │   └── feedback.py                # profile-vector update + budget debit
 │   └── campaigns/                    # advertiser posts a campaign
-│       ├── api.py                     # POST/GET /campaigns, /moderate
+│       ├── api.py                     # POST/GET /campaigns, /moderate (role-gated)
 │       ├── policy_review.py           # LangChain + MCP policy review agent
 │       ├── review_jobs.py             # RQ job: run review, persist outcome
 │       └── indexing.py                # embed + upsert an approved campaign
@@ -275,7 +287,7 @@ backend/
 ├── data/
 │   ├── generate_personas.py        # synthetic user generation
 │   └── seed_campaigns.json         # versioned seed campaign catalog (~288 campaigns)
-├── tests/                          # 74 tests — see README for how to run
+├── tests/                          # 115 tests — see README for how to run
 ├── scripts/
 │   ├── simulate_feedback_rounds.py       # runs multi-round CTR demo
 │   ├── generate_seed_campaign_data.py    # LLM-generates data/seed_campaigns.json

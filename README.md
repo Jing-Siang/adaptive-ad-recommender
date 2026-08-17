@@ -127,9 +127,37 @@ for the full design.
 
 ### 5. Try it
 
+Every endpoint below requires a bearer token (see `docs/auth_plan.md` --
+Google OAuth + JWT, no `user_id` request fields anywhere, it comes from
+the token). The real login path is the frontend's Google Sign-In button;
+for curl testing, mint a local token directly instead of going through a
+real Google account:
+
+```bash
+cd backend && source .venv/bin/activate && python3 -c "
+from app.core.db import SessionLocal
+from app.core.auth import create_access_token
+from app.models import User
+
+db = SessionLocal()
+user = db.query(User).filter_by(google_sub='demo-sub').first()
+if user is None:
+    user = User(google_sub='demo-sub', email='demo@example.com', display_name='Demo User', role='moderator')
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+print(create_access_token(user))
+"
+# copy the printed token
+export TOKEN='<paste it here>'
+```
+
+`moderator` is a superset role (see the role model above), so this one
+token covers every example below.
+
 ```bash
 # submit a campaign
-curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' -d '{
+curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
   "advertiser_name": "Acme Plumbing Co",
   "headline": "24/7 Emergency Plumbing",
   "description": "Licensed plumbers near you. Free estimates.",
@@ -141,38 +169,29 @@ curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' -d '{
 }'
 # -> status=pending_review; the worker picks it up and reviews it within a few seconds
 
-# no accounts/login -- a user is just a caller-supplied user_id. Create a
-# profile once (this is what retrieve/recommend reads back, it never embeds
-# raw text on its own):
-curl -X POST localhost:8000/users -H 'Content-Type: application/json' -d '{
-  "user_id": "demo-user-1",
-  "interest_summary": "need a plumber for a leaky faucet"
-}'
-
 # once the campaign's approved AND kafka-consumer has processed it (poll
-# GET /campaigns/{id} for status=active, then check the consumer's own
-# logs or just wait a couple seconds), get a recommendation
-curl -X POST localhost:8000/recommend -H 'Content-Type: application/json' -d '{
-  "user_id": "demo-user-1",
-  "top_k": 5
+# GET /campaigns?status=active, then check the consumer's own logs or just
+# wait a couple seconds), the profile vector gets seeded the first time
+# /onboarding/checkpoint decides to show candidates -- see
+# app/serving/onboarding_api.py. Simplest way to get a recommendation
+# without going through the full chat flow is to seed one directly:
+curl -X POST localhost:8000/onboarding/checkpoint -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
+  "messages": [{"role": "user", "content": "need a plumber for a leaky faucet"}]
 }'
 
-# feed-facing version: one call returns a ranked batch instead of one ad
-curl -X POST localhost:8000/recommend/batch -H 'Content-Type: application/json' -d '{
-  "user_id": "demo-user-1",
+# feed-facing recommend: one call returns a ranked, guardrail-allowed batch
+curl -X POST localhost:8000/recommend/batch -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
   "batch_size": 10
 }'
 
 # log an impression once a served ad actually scrolls into view
-curl -X POST localhost:8000/events/impression -H 'Content-Type: application/json' -d '{
-  "user_id": "demo-user-1",
+curl -X POST localhost:8000/events/impression -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
   "ad_id": "<served ad_id from above>"
 }'
 
 # react to the served ad -- like/dislike/interested; nudges the profile and
 # (for like/interested) debits the campaign's budget
-curl -X POST localhost:8000/events/reaction -H 'Content-Type: application/json' -d '{
-  "user_id": "demo-user-1",
+curl -X POST localhost:8000/events/reaction -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
   "ad_id": "<served ad_id from above>",
   "reaction": "like"
 }'
@@ -182,7 +201,7 @@ If a campaign comes back `needs_review` instead of `active`/`rejected`,
 resolve it as a moderator:
 
 ```bash
-curl -X POST localhost:8000/campaigns/<id>/moderate -H 'Content-Type: application/json' -d '{
+curl -X POST localhost:8000/campaigns/<id>/moderate -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
   "outcome": "approved",
   "reason": "complies with policy",
   "reviewed_by": "your-name"
