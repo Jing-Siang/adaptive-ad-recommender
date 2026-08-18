@@ -43,11 +43,23 @@ _DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "seed_campaigns.j
 
 def seed_campaigns() -> list[Campaign]:
     """Create the seed account (if needed), then create + index a Campaign
-    row for every entry in data/seed_campaigns.json -- skipping the async
-    review job entirely, same end state as a real approved campaign
-    (status=active, embedded, indexed). Skips re-seeding entirely if this
-    account already has a full catalog, so re-running the script doesn't
-    pile up duplicate batches."""
+    row for every entry in data/seed_campaigns.json that isn't already in
+    Postgres -- skipping the async review job entirely, same end state as a
+    real approved campaign (status=active, embedded, indexed).
+
+    "Already in Postgres" is checked by (headline, category) existing
+    anywhere in the campaigns table, not by counting rows owned by the seed
+    account -- the original catalog's rows ended up owned by a real user
+    account instead (see docs/auth_plan.md Phase 5: the Advertiser->User
+    migration backfilled every pre-existing campaign, including these, to
+    whichever user existed at the time, since there was no seed account yet
+    to backfill to). Counting the seed account's own rows would see 0 and
+    re-create the whole original catalog as duplicates the moment this
+    script runs after that migration. Content-based dedup is correct
+    regardless of which account historically owns what, and makes growing
+    data/seed_campaigns.json with a fresh generation batch (see
+    generate_seed_campaign_data.py) and re-running this safe by default --
+    no manual bookkeeping of how many rows were "already loaded"."""
     seed_data = json.loads(_DATA_PATH.read_text())
 
     db = SessionLocal()
@@ -63,17 +75,14 @@ def seed_campaigns() -> list[Campaign]:
             )
             db.add(seed_user)
             db.flush()
-        else:
-            existing_count = db.query(Campaign).filter_by(user_id=seed_user.id).count()
-            if existing_count >= len(seed_data):
-                print(
-                    f"Seed account already has {existing_count} campaigns "
-                    f"(>= {len(seed_data)} in seed file) -- skipping."
-                )
-                return []
+
+        existing_pairs = {(h, c) for h, c in db.query(Campaign.headline, Campaign.category).all()}
 
         today = date.today()
         for entry in seed_data:
+            key = (entry["headline"], entry["category"])
+            if key in existing_pairs:
+                continue
             excluded_categories = sorted(CATEGORY_EXCLUSIONS.get(entry["category"], set()))
             campaign = Campaign(
                 user_id=seed_user.id,
@@ -81,7 +90,7 @@ def seed_campaigns() -> list[Campaign]:
                 description=entry["description"],
                 category=entry["category"],
                 objective=entry["objective"],
-                budget_total=500.0,
+                budget_total=100.0,
                 budget_spent=0.0,
                 start_date=today - timedelta(days=1),
                 end_date=today + timedelta(days=365),
@@ -96,7 +105,10 @@ def seed_campaigns() -> list[Campaign]:
             index_campaign(campaign)
             log_event("campaign_seeded", campaign_id=campaign.id, category=entry["category"])
             created.append(campaign)
+            existing_pairs.add(key)
         db.commit()
+        if not created:
+            print(f"All {len(seed_data)} entries in the seed file are already loaded -- nothing to do.")
     finally:
         db.close()
     return created
