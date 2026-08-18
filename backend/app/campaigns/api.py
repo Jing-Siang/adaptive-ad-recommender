@@ -55,19 +55,22 @@ def create_campaign(
 @router.get("", response_model=CampaignListResponse)
 def list_campaigns(
     status: str | None = None,
+    category: str | None = None,
     search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> CampaignListResponse:
     """List campaigns, paginated, optionally filtered by status —
-    status=needs_review is the moderator queue — and/or searched by headline
-    (case-insensitive substring). Filtering/searching/paging all happen in
-    the query itself, not after loading rows into Python, since the catalog
-    is thousands of rows."""
+    status=needs_review is the moderator queue — and/or category, and/or
+    searched by headline (case-insensitive substring). Filtering/searching/
+    paging all happen in the query itself, not after loading rows into
+    Python, since the catalog is thousands of rows."""
     query = db.query(Campaign)
     if status:
         query = query.filter_by(status=status)
+    if category:
+        query = query.filter_by(category=category)
     if search:
         query = query.filter(Campaign.headline.ilike(f"%{search}%"))
 

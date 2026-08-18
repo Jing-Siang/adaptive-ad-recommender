@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Info, Plus, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info, Plus } from 'lucide-react'
 import { listCampaigns } from '../api'
 import type { CampaignListResponse } from '../types'
-import { categoryLabel } from '../categories'
+import { CAMPAIGN_CATEGORIES, categoryLabel } from '../categories'
 import { StatusBadge } from '../components/StatusBadge'
 import { CampaignFormModal } from '../components/CampaignFormModal'
 import { Spinner } from '../components/Spinner'
@@ -12,6 +12,9 @@ const STATUS_OPTIONS = ['pending_review', 'needs_review', 'active', 'rejected', 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const SEARCH_DEBOUNCE_MS = 350
 
+const filterSelectClass =
+  'w-full rounded border border-stone-300 bg-white px-2 py-1 text-xs outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:focus:border-stone-500'
+
 export function CampaignsPage() {
   const [data, setData] = useState<CampaignListResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -20,6 +23,7 @@ export function CampaignsPage() {
 
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [category, setCategory] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -33,14 +37,21 @@ export function CampaignsPage() {
   }, [searchInput])
 
   // Any filter change invalidates the current page number -- e.g. page 5 of
-  // an unfiltered list may not exist once a search/status narrows the set.
+  // an unfiltered list may not exist once a search/category/status narrows
+  // the set.
   useEffect(() => {
     setPage(1)
-  }, [search, status, pageSize])
+  }, [search, category, status, pageSize])
 
   useEffect(() => {
     let cancelled = false
-    listCampaigns({ status: status || undefined, search: search || undefined, page, pageSize })
+    listCampaigns({
+      status: status || undefined,
+      category: category || undefined,
+      search: search || undefined,
+      page,
+      pageSize,
+    })
       .then((result) => {
         if (!cancelled) setData(result)
       })
@@ -53,7 +64,7 @@ export function CampaignsPage() {
     return () => {
       cancelled = true
     }
-  }, [search, status, page, pageSize, refreshKey])
+  }, [search, category, status, page, pageSize, refreshKey])
 
   if (loading && !data) {
     return (
@@ -66,8 +77,7 @@ export function CampaignsPage() {
   const campaigns = data?.items ?? []
   const totalPages = data?.total_pages ?? 1
   const total = data?.total ?? 0
-  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
-  const rangeEnd = Math.min(page * pageSize, total)
+  const hasFilters = Boolean(search || category || status)
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-6">
@@ -92,29 +102,31 @@ export function CampaignsPage() {
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-48">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by headline…"
-            className="w-full rounded-lg border border-stone-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:focus:border-stone-500"
-          />
+      <div className="flex items-center justify-between text-sm text-stone-600 dark:text-stone-400">
+        <span>Total: {total}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+            aria-label="Previous page"
+            className="grid place-items-center rounded-lg border border-stone-300 p-1.5 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-stone-700 dark:hover:bg-stone-800"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="min-w-20 text-center">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+            aria-label="Next page"
+            className="grid place-items-center rounded-lg border border-stone-300 p-1.5 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-stone-700 dark:hover:bg-stone-800"
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:focus:border-stone-500"
-        >
-          <option value="">All statuses</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {categoryLabel(s)}
-            </option>
-          ))}
-        </select>
         <select
           value={pageSize}
           onChange={(e) => setPageSize(Number(e.target.value))}
@@ -136,14 +148,51 @@ export function CampaignsPage() {
               <th className="py-2 pr-4">Category</th>
               <th className="py-2 pr-4">Status</th>
               <th className="py-2 pr-4">Budget</th>
-              <th className="py-2 pr-4">Note</th>
+              <th className="py-2 pr-4">Review reason</th>
+            </tr>
+            {/* Inline per-column filters, directly under the headers they
+                filter -- headline is a free-text search, category/status
+                are exact-match dropdowns matching what the backend query
+                actually supports. Budget/review reason aren't filterable. */}
+            <tr className="border-b border-stone-200 dark:border-stone-700">
+              <th className="py-1.5 pr-4 font-normal">
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Filter"
+                  className={filterSelectClass}
+                />
+              </th>
+              <th className="py-1.5 pr-4 font-normal">
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className={filterSelectClass}>
+                  <option value="">All</option>
+                  {CAMPAIGN_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {categoryLabel(c)}
+                    </option>
+                  ))}
+                </select>
+              </th>
+              <th className="py-1.5 pr-4 font-normal">
+                <select value={status} onChange={(e) => setStatus(e.target.value)} className={filterSelectClass}>
+                  <option value="">All</option>
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {categoryLabel(s)}
+                    </option>
+                  ))}
+                </select>
+              </th>
+              <th className="py-1.5 pr-4" />
+              <th className="py-1.5 pr-4" />
             </tr>
           </thead>
           <tbody>
             {campaigns.length === 0 ? (
               <tr>
                 <td colSpan={5} className="py-6 text-center text-stone-500 dark:text-stone-500">
-                  {search || status ? 'No campaigns match these filters.' : 'No campaigns yet.'}
+                  {hasFilters ? 'No campaigns match these filters.' : 'No campaigns yet.'}
                 </td>
               </tr>
             ) : (
@@ -164,39 +213,6 @@ export function CampaignsPage() {
           </tbody>
         </table>
       </div>
-
-      {total > 0 && (
-        <div className="flex items-center justify-between text-sm text-stone-600 dark:text-stone-400">
-          <span>
-            Showing {rangeStart}–{rangeEnd} of {total}
-          </span>
-          <div className="flex items-center gap-3">
-            <span>
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-                aria-label="Previous page"
-                className="grid place-items-center rounded-lg border border-stone-300 p-1.5 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-stone-700 dark:hover:bg-stone-800"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                type="button"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                aria-label="Next page"
-                className="grid place-items-center rounded-lg border border-stone-300 p-1.5 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-stone-700 dark:hover:bg-stone-800"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showModal && (
         <CampaignFormModal

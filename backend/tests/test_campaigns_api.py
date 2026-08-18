@@ -73,6 +73,15 @@ def test_list_campaigns_filters_by_status(db, campaign):
     assert campaign.id not in [c["id"] for c in resp_other.json()["items"]]
 
 
+def test_list_campaigns_filters_by_category(db, campaign):
+    resp = client.get("/campaigns", params={"category": campaign.category})
+    assert resp.status_code == 200
+    assert campaign.id in [c["id"] for c in resp.json()["items"]]
+
+    resp_other = client.get("/campaigns", params={"category": "not-a-real-category"})
+    assert campaign.id not in [c["id"] for c in resp_other.json()["items"]]
+
+
 def test_list_campaigns_searches_by_headline(db, campaign):
     campaign.headline = "Unique Pytest Search Headline"
     db.commit()

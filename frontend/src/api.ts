@@ -241,6 +241,7 @@ export function createCampaign(payload: CampaignCreateRequest): Promise<Campaign
 
 export interface ListCampaignsParams {
   status?: string
+  category?: string
   search?: string
   page?: number
   pageSize?: number
@@ -249,6 +250,7 @@ export interface ListCampaignsParams {
 export function listCampaigns(params: ListCampaignsParams = {}): Promise<CampaignListResponse> {
   const query = new URLSearchParams()
   if (params.status) query.set('status', params.status)
+  if (params.category) query.set('category', params.category)
   if (params.search) query.set('search', params.search)
   if (params.page) query.set('page', String(params.page))
   if (params.pageSize) query.set('page_size', String(params.pageSize))
