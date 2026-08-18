@@ -104,7 +104,13 @@ function App() {
               purpose, see docs/auth_plan.md). Hidden via CSS instead of
               being routed, so it keeps its state across every other page
               visit; only a real page reload loses it. */}
-          <div className={onFeedRoute ? undefined : 'hidden'}>
+          {/* display:contents when visible -- this div must not become a
+              real box in the layout, since OnboardingFeedPage's own root
+              div relies on being a direct child of the scroll container
+              (.simplebar-content) for its min-h-full/flex-1 height chain
+              to resolve. A plain block wrapper broke that chain: the
+              composer lost its "pinned to viewport bottom" sizing. */}
+          <div className={onFeedRoute ? 'contents' : 'hidden'}>
             <OnboardingFeedPage />
           </div>
           {!onFeedRoute && (
