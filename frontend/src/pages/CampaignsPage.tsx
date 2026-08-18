@@ -196,7 +196,14 @@ export function CampaignsPage() {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        <table className="w-full table-fixed text-left text-sm">
+          <colgroup>
+            <col className="w-[28%]" />
+            <col className="w-[16%]" />
+            <col className="w-[14%]" />
+            <col className="w-[18%]" />
+            <col className="w-[24%]" />
+          </colgroup>
           <thead>
             <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
               <th className="py-2 pr-4">
@@ -277,15 +284,21 @@ export function CampaignsPage() {
             ) : (
               campaigns.map((c) => (
                 <tr key={c.id} className="border-b border-stone-100 dark:border-stone-900">
-                  <td className="py-2 pr-4 font-medium">{c.headline}</td>
-                  <td className="py-2 pr-4 text-stone-600 dark:text-stone-400">{categoryLabel(c.category)}</td>
+                  <td className="truncate py-2 pr-4 font-medium" title={c.headline}>
+                    {c.headline}
+                  </td>
+                  <td className="truncate py-2 pr-4 text-stone-600 dark:text-stone-400">
+                    {categoryLabel(c.category)}
+                  </td>
                   <td className="py-2 pr-4">
                     <StatusBadge status={c.status} />
                   </td>
-                  <td className="py-2 pr-4 text-stone-600 dark:text-stone-400">
+                  <td className="truncate py-2 pr-4 text-stone-600 dark:text-stone-400">
                     ${c.budget_spent.toFixed(2)} / ${c.budget_total.toFixed(2)}
                   </td>
-                  <td className="py-2 pr-4 text-stone-500 dark:text-stone-500">{c.review_reason ?? '—'}</td>
+                  <td className="truncate py-2 pr-4 text-stone-500 dark:text-stone-500" title={c.review_reason ?? undefined}>
+                    {c.review_reason ?? '—'}
+                  </td>
                 </tr>
               ))
             )}
