@@ -3,18 +3,17 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.schemas import AdCandidate, GuardrailResult, RankedAd
+from app.schemas import AdCandidate, GuardrailResult
 from tests.conftest import auth_header
 
 client = TestClient(app)
 
+# Already in similarity-descending order -- retrieve_candidates guarantees
+# this (Pinecone returns nearest-first), and recommend_batch relies on it
+# now that LLM re-ranking is disabled (see app/serving/api.py's docstring).
 _CANDIDATES = [
-    AdCandidate(ad_id="1", headline="A", description="desc A", category="home_repair", similarity_score=0.9),
-    AdCandidate(ad_id="2", headline="B", description="desc B", category="alcohol", similarity_score=0.8),
-]
-_RANKINGS = [
-    RankedAd(ad_id="1", relevance_score=0.7, justification="matches home repair interest"),
-    RankedAd(ad_id="2", relevance_score=0.95, justification="matches drink preference"),
+    AdCandidate(ad_id="1", headline="A", description="desc A", category="alcohol", similarity_score=0.9),
+    AdCandidate(ad_id="2", headline="B", description="desc B", category="home_repair", similarity_score=0.8),
 ]
 
 
@@ -25,25 +24,20 @@ def _guardrail_side_effect(ad, context_categories):
 
 
 @patch("app.serving.api.check_guardrails", side_effect=_guardrail_side_effect)
-@patch("app.serving.api.rerank", return_value=_RANKINGS)
-@patch("app.serving.api.fetch_metadata", return_value={"interest_summary": "loves home repair"})
 @patch("app.serving.api.retrieve_candidates", return_value=_CANDIDATES)
-def test_recommend_batch_sorts_by_relevance_and_filters_guardrail_blocked(
-    mock_retrieve, mock_fetch_metadata, mock_rerank, mock_guardrail, user
-):
-    """Batch response is sorted by relevance_score, and a higher-ranked ad
-    that fails the guardrail check is dropped rather than served."""
+def test_recommend_batch_orders_by_similarity_and_filters_guardrail_blocked(mock_retrieve, mock_guardrail, user):
+    """Batch response preserves retrieve_candidates' similarity order, and a
+    higher-similarity ad that fails the guardrail check is dropped rather
+    than served."""
     resp = client.post("/recommend/batch", json={"batch_size": 10}, headers=auth_header(user))
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["user_id"] == str(user.id)
-    # ad_id "2" ranks higher (0.95) but is guardrail-blocked (alcohol), so only "1" remains
-    assert [item["ad_id"] for item in data["items"]] == ["1"]
-    assert data["items"][0]["relevance_score"] == 0.7
-    assert data["items"][0]["justification"] == "matches home repair interest"
-    # rerank must get the real interest summary, not the bare user_id
-    mock_rerank.assert_called_once_with(user_context="loves home repair", candidates=_CANDIDATES)
+    # ad_id "1" has higher similarity (0.9) but is guardrail-blocked (alcohol), so only "2" remains
+    assert [item["ad_id"] for item in data["items"]] == ["2"]
+    assert data["items"][0]["relevance_score"] == 0.8
+    assert data["items"][0]["justification"] == "Ranked by vector similarity to your profile."
 
 
 @patch("app.serving.api.retrieve_candidates", side_effect=ValueError("no profile found for user 'x'"))
