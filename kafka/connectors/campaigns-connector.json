@@ -14,7 +14,7 @@
     "publication.name": "ad_recommender_campaigns_pub",
     "publication.autocreate.mode": "filtered",
     "table.include.list": "public.campaigns",
-    "snapshot.mode": "initial",
+    "snapshot.mode": "no_data",
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
     "key.converter.schemas.enable": "false",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
