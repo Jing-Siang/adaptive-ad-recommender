@@ -8,6 +8,7 @@ from app.core.auth import require_role
 from app.core.db import get_db
 from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
+from app.core.rate_limit import enforce_rate_limit
 from app.models import Campaign, User
 from app.core.queue import campaign_review_queue
 from app.schemas import (
@@ -20,6 +21,12 @@ from app.schemas import (
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
+# Each submission enqueues a real OpenAI policy-review call (plus an MCP ad-
+# policy fetch) -- a real per-request cost, not just noise, so this caps it
+# per account rather than leaving it open to anyone with an advertiser login.
+_CAMPAIGN_CREATE_LIMIT = 10
+_CAMPAIGN_CREATE_WINDOW_SECONDS = 3600
+
 
 @router.post("", response_model=CampaignResponse, status_code=201)
 def create_campaign(
@@ -31,6 +38,9 @@ def create_campaign(
     the policy review agent runs asynchronously via the campaign_review queue.
     The submitting account is the owner directly (user_id) -- no separate
     Advertiser entity, see docs/auth_plan.md."""
+    enforce_rate_limit(
+        f"rate_limit:campaign_create:{current.id}", _CAMPAIGN_CREATE_LIMIT, _CAMPAIGN_CREATE_WINDOW_SECONDS
+    )
     campaign = Campaign(
         user_id=current.id,
         headline=request.headline,

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from app.core.queue import redis_conn
 from app.main import app
 from app.models import Campaign
 from tests.conftest import auth_header
@@ -59,6 +60,25 @@ def test_create_campaign_attributes_each_submission_to_its_own_account(mock_queu
         assert resp2.json()["user_id"] == moderator_user.id
     finally:
         _cleanup(db, [resp1.json()["id"], resp2.json()["id"]])
+
+
+@patch("app.campaigns.api.campaign_review_queue")
+def test_create_campaign_rate_limits_after_ten_in_an_hour(mock_queue, db, advertiser_user):
+    from app.campaigns.api import _CAMPAIGN_CREATE_LIMIT
+
+    headers = auth_header(advertiser_user)
+    created_ids: list[int] = []
+    try:
+        for _ in range(_CAMPAIGN_CREATE_LIMIT):
+            resp = client.post("/campaigns", json=_BASE_PAYLOAD, headers=headers)
+            assert resp.status_code == 201
+            created_ids.append(resp.json()["id"])
+
+        resp = client.post("/campaigns", json=_BASE_PAYLOAD, headers=headers)
+        assert resp.status_code == 429
+    finally:
+        _cleanup(db, created_ids)
+        redis_conn.delete(f"rate_limit:campaign_create:{advertiser_user.id}")
 
 
 def test_list_campaigns_filters_by_status(db, campaign):
