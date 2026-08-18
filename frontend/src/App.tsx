@@ -1,4 +1,4 @@
-import { NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import { MessageSquare, BarChart3, Megaphone, ShieldCheck, LogOut } from 'lucide-react'
 import SimpleBar from 'simplebar-react'
 import 'simplebar-react/dist/simplebar.min.css'
@@ -25,15 +25,14 @@ const NAV_LINKS: { to: string; label: string; end?: boolean; Icon: typeof Messag
 ]
 
 /** Defense beyond just hiding the nav link -- someone can still type the
- * URL directly, so the route itself checks the role too. */
+ * URL directly, so the route itself checks the role too. Redirects to the
+ * feed rather than showing a "no access" message, same as an unmatched
+ * URL (see the catch-all route below) -- neither case is worth a dead-end
+ * page, just send them back to the one page everyone can always see. */
 function RequireRole({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
   const { user } = useAuth()
   if (!user || !roles.includes(user.role)) {
-    return (
-      <div className="p-8 text-sm text-stone-500 dark:text-stone-400">
-        You don't have access to this page.
-      </div>
-    )
+    return <Navigate to="/" replace />
   }
   return <>{children}</>
 }
@@ -122,6 +121,9 @@ function App() {
                 </RequireRole>
               }
             />
+            {/* Any unmatched URL -- typos, stale links, made-up paths --
+                lands back on the feed instead of a blank page. */}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </SimpleBar>
       </main>
