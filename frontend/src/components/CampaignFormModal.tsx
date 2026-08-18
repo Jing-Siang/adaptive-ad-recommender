@@ -47,11 +47,8 @@ export function CampaignFormModal({ onCreated, onClose }: { onCreated: () => voi
   const inputClass = 'rounded border border-stone-300 px-3 py-2 dark:border-stone-700 dark:bg-stone-800'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 dark:bg-stone-800"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 dark:bg-stone-800">
         <div className="flex items-center gap-1.5">
           <h3 className="text-lg font-semibold">New campaign</h3>
           <Tooltip
@@ -83,7 +80,7 @@ export function CampaignFormModal({ onCreated, onClose }: { onCreated: () => voi
               rows={3}
               value={form.description}
               onChange={(e) => update('description', e.target.value)}
-              className={inputClass}
+              className={`${inputClass} thin-scrollbar min-h-20 max-h-40 overflow-y-auto`}
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">

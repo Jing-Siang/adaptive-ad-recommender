@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Info, Plus } from 'lucide-react'
 import { listCampaigns } from '../api'
 import type { CampaignResponse } from '../types'
 import { categoryLabel } from '../categories'
 import { StatusBadge } from '../components/StatusBadge'
 import { CampaignFormModal } from '../components/CampaignFormModal'
 import { Spinner } from '../components/Spinner'
+import { Tooltip } from '../components/Tooltip'
 
 export function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignResponse[]>([])
@@ -48,14 +49,18 @@ export function CampaignsPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Campaigns</h1>
-          <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">All submitted campaigns and their status.</p>
+        <div className="flex items-center gap-1.5">
+          <h1 className="mt-3 text-2xl font-semibold">Campaigns</h1>
+          <Tooltip side="right" content="All submitted campaigns and their status.">
+            <span className="mt-3.5 text-stone-500 dark:text-stone-400">
+              <Info size={16} />
+            </span>
+          </Tooltip>
         </div>
         <button
           type="button"
           onClick={() => setShowModal(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+          className="mt-4 flex items-center gap-1.5 rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
         >
           <Plus size={16} />
           New campaign

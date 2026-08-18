@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { Info } from 'lucide-react'
 import { listCampaigns, moderateCampaign } from '../api'
 import type { CampaignResponse } from '../types'
 import { categoryLabel } from '../categories'
 import { Spinner } from '../components/Spinner'
+import { Tooltip } from '../components/Tooltip'
 
 export function ModeratorPage() {
   const [campaigns, setCampaigns] = useState<CampaignResponse[]>([])
@@ -55,12 +57,16 @@ export function ModeratorPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Moderator Queue</h1>
-        <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">
-          Campaigns the AI reviewer wasn't confident about, waiting on a human decision. No login — only
-          attribution: your name is recorded as reviewed_by.
-        </p>
+      <div className="flex items-center gap-1.5">
+        <h1 className="mt-3 text-2xl font-semibold">Moderator Queue</h1>
+        <Tooltip
+          side="right"
+          content="Campaigns the AI reviewer flagged for a human decision. Your name is recorded with the decision for the audit trail."
+        >
+          <span className="mt-3.5 text-stone-500 dark:text-stone-400">
+            <Info size={16} />
+          </span>
+        </Tooltip>
       </div>
 
       <label className="flex max-w-xs flex-col gap-1 text-sm">

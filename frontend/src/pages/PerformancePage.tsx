@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { Info } from 'lucide-react'
 import { fetchPerformance } from '../api'
 import type { PerformanceResponse } from '../types'
 import { StatTile } from '../components/StatTile'
 import { CtrTrendChart } from '../components/CtrTrendChart'
 import { StatusBadge } from '../components/StatusBadge'
 import { Spinner } from '../components/Spinner'
+import { Tooltip } from '../components/Tooltip'
 
 function formatCompact(n: number): string {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(n)
@@ -48,11 +50,13 @@ export function PerformancePage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Performance</h1>
-        <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">
-          Aggregate across all activity, not scoped to one user — a window into the engine, not one person's feed.
-        </p>
+      <div className="flex items-center gap-1.5">
+        <h1 className="mt-3 text-2xl font-semibold">Performance</h1>
+        <Tooltip side="right" content="Totals across all users and campaigns, not just your own activity.">
+          <span className="mt-3.5 text-stone-500 dark:text-stone-400">
+            <Info size={16} />
+          </span>
+        </Tooltip>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
