@@ -72,20 +72,23 @@ class Campaign(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Creative
-    headline: Mapped[str] = mapped_column(String(200))
+    # index=True on headline/category/status/budget_total/budget_spent/
+    # created_at -- GET /campaigns and GET /performance/campaigns filter by
+    # category/status and sort by any of these, on a catalog now in the
+    # thousands of rows. The index on headline only serves ORDER BY, not
+    # the search box's leading-wildcard ILIKE '%term%' -- a plain btree
+    # index can't serve that (would need a pg_trgm GIN index instead).
+    headline: Mapped[str] = mapped_column(String(200), index=True)
     description: Mapped[str] = mapped_column(String(1000))
-    # index=True on category/status/budget_total/created_at -- GET /campaigns
-    # and GET /performance/campaigns filter by category/status and sort by
-    # any of these, on a catalog now in the thousands of rows. headline
-    # isn't indexed here -- the search on it is a leading-wildcard
-    # ILIKE '%term%', which a plain btree index can't serve anyway (would
-    # need a pg_trgm GIN index instead).
     category: Mapped[str] = mapped_column(String(100), index=True)
 
     # Campaign terms
     objective: Mapped[str] = mapped_column(String(100))
     budget_total: Mapped[float] = mapped_column(Float, index=True)
-    budget_spent: Mapped[float] = mapped_column(Float, default=0.0)
+    # budget_spent, not budget_total, is what GET /performance/campaigns
+    # sorts by (sort_by="spend") -- a distinct column from the Campaigns
+    # page's "Budget" sort, needs its own index.
+    budget_spent: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     start_date: Mapped[date]
     end_date: Mapped[date]
     excluded_categories: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
