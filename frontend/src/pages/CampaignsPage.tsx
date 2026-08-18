@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { listCampaigns } from '../api'
 import type { CampaignResponse } from '../types'
+import { categoryLabel } from '../categories'
 import { StatusBadge } from '../components/StatusBadge'
 import { CampaignFormModal } from '../components/CampaignFormModal'
 import { Spinner } from '../components/Spinner'
@@ -81,7 +82,7 @@ export function CampaignsPage() {
               {campaigns.map((c) => (
                 <tr key={c.id} className="border-b border-stone-100 dark:border-stone-900">
                   <td className="py-2 pr-4 font-medium">{c.headline}</td>
-                  <td className="py-2 pr-4 text-stone-600 dark:text-stone-400">{c.category}</td>
+                  <td className="py-2 pr-4 text-stone-600 dark:text-stone-400">{categoryLabel(c.category)}</td>
                   <td className="py-2 pr-4">
                     <StatusBadge status={c.status} />
                   </td>

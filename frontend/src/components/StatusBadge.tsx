@@ -10,7 +10,7 @@ export function StatusBadge({ status }: { status: string }) {
   const style = STATUS_STYLES[status] ?? 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>
-      {status.replace('_', ' ')}
+      {status.replace(/_/g, ' ')}
     </span>
   )
 }

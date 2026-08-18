@@ -1,5 +1,8 @@
 import { useState, type SubmitEvent } from 'react'
+import { Info } from 'lucide-react'
 import { createCampaign } from '../api'
+import { CAMPAIGN_CATEGORIES, categoryLabel } from '../categories'
+import { Tooltip } from './Tooltip'
 
 const EMPTY_FORM = {
   headline: '',
@@ -49,10 +52,17 @@ export function CampaignFormModal({ onCreated, onClose }: { onCreated: () => voi
         className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 dark:bg-stone-800"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold">New campaign</h3>
-        <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">
-          Submits with status=pending_review; an AI reviewer picks it up asynchronously within a few seconds.
-        </p>
+        <div className="flex items-center gap-1.5">
+          <h3 className="text-lg font-semibold">New campaign</h3>
+          <Tooltip
+            side="right"
+            content="Submits for review. An AI reviewer picks it up automatically within a few seconds."
+          >
+            <span className="mt-0.5 text-stone-500 dark:text-stone-400">
+              <Info size={15} />
+            </span>
+          </Tooltip>
+        </div>
 
         <form onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
@@ -78,23 +88,33 @@ export function CampaignFormModal({ onCreated, onClose }: { onCreated: () => voi
           </label>
           <label className="flex flex-col gap-1 text-sm">
             Category
-            <input
+            <select
               required
-              placeholder="e.g. home_repair"
               value={form.category}
               onChange={(e) => update('category', e.target.value)}
               className={inputClass}
-            />
+            >
+              <option value="" disabled>
+                Select a category
+              </option>
+              {CAMPAIGN_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {categoryLabel(cat)}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             Objective
-            <input
+            <select
               required
-              placeholder="conversions / awareness"
               value={form.objective}
               onChange={(e) => update('objective', e.target.value)}
               className={inputClass}
-            />
+            >
+              <option value="conversions">Conversions</option>
+              <option value="awareness">Awareness</option>
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             Budget total ($)

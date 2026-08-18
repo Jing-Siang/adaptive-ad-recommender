@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Flag, EyeOff, Info } from 'lucide-react'
 import { clearReaction, doNotShowAgain, logImpression, sendReaction, sendReport } from '../api'
 import type { FeedItem, Reaction, ReportCategory } from '../types'
+import { categoryLabel } from '../categories'
 import { ReactionButtons } from './ReactionButtons'
 import { ReportModal } from './ReportModal'
 
@@ -85,7 +86,7 @@ export function FeedCard({
     <div ref={cardRef} className="rounded border border-stone-200 p-4 dark:border-stone-700">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-semibold">{item.headline}</h3>
-        <span className="text-xs text-stone-500 dark:text-stone-500">{item.category}</span>
+        <span className="text-xs text-stone-500 dark:text-stone-500">{categoryLabel(item.category)}</span>
       </div>
       <p className="mt-1 text-sm text-stone-700 dark:text-stone-300">{item.description}</p>
       {item.price !== null && <p className="mt-1 text-sm font-medium">${item.price.toFixed(2)}</p>}

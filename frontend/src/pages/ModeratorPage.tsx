@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { listCampaigns, moderateCampaign } from '../api'
 import type { CampaignResponse } from '../types'
+import { categoryLabel } from '../categories'
 import { Spinner } from '../components/Spinner'
 
 export function ModeratorPage() {
@@ -81,7 +82,7 @@ export function ModeratorPage() {
             <li key={c.id} className="rounded border border-stone-200 p-4 dark:border-stone-700">
               <div className="flex items-baseline justify-between gap-2">
                 <h2 className="font-semibold">{c.headline}</h2>
-                <span className="text-xs text-stone-500 dark:text-stone-500">{c.category}</span>
+                <span className="text-xs text-stone-500 dark:text-stone-500">{categoryLabel(c.category)}</span>
               </div>
               <p className="mt-1 text-sm text-stone-700 dark:text-stone-300">{c.description}</p>
               <p className="mt-2 text-xs text-stone-500 dark:text-stone-500">
