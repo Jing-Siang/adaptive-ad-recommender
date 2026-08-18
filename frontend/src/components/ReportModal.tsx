@@ -21,11 +21,8 @@ export function ReportModal({
   const needsReason = category === 'other'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-sm rounded bg-white p-4 dark:bg-stone-800"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded bg-white p-4 dark:bg-stone-800">
         <h3 className="font-semibold">Report this ad</h3>
         <div className="mt-3 space-y-2">
           {CATEGORIES.map((c) => (
@@ -46,7 +43,7 @@ export function ReportModal({
             onChange={(e) => setReason(e.target.value)}
             placeholder="Tell us more…"
             rows={2}
-            className="mt-2 w-full rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-800"
+            className="thin-scrollbar mt-2 min-h-16 max-h-40 w-full overflow-y-auto rounded border border-stone-300 px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-800"
           />
         )}
         <div className="mt-4 flex justify-end gap-2">

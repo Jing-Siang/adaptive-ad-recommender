@@ -101,7 +101,7 @@ export function ModeratorPage() {
                   rows={2}
                   value={reasons[c.id] ?? ''}
                   onChange={(e) => setReasons((r) => ({ ...r, [c.id]: e.target.value }))}
-                  className="rounded border border-stone-300 px-3 py-2 dark:border-stone-700 dark:bg-stone-800"
+                  className="thin-scrollbar min-h-16 max-h-40 overflow-y-auto rounded border border-stone-300 px-3 py-2 dark:border-stone-700 dark:bg-stone-800"
                 />
               </label>
               <div className="mt-3 flex gap-2">

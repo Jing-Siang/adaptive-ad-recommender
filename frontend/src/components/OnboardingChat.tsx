@@ -284,7 +284,7 @@ export function OnboardingChat({ onFinish }: { onFinish: () => void }) {
                 onKeyDown={handleKeyDown}
                 placeholder="Type a reply…"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT }}
-                className="thin-scrollbar block max-h-40 flex-1 resize-none bg-transparent py-2 leading-relaxed outline-none"
+                className="thin-scrollbar block min-h-9 max-h-40 flex-1 resize-none bg-transparent py-2 leading-relaxed outline-none"
               />
               {/* items-end on the row pins the button to the box's bottom edge,
                   which stays put in the viewport as the box grows upward --
