@@ -74,24 +74,30 @@ class Campaign(Base):
     # Creative
     headline: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(String(1000))
-    category: Mapped[str] = mapped_column(String(100))
+    # index=True on category/status/budget_total/created_at -- GET /campaigns
+    # and GET /performance/campaigns filter by category/status and sort by
+    # any of these, on a catalog now in the thousands of rows. headline
+    # isn't indexed here -- the search on it is a leading-wildcard
+    # ILIKE '%term%', which a plain btree index can't serve anyway (would
+    # need a pg_trgm GIN index instead).
+    category: Mapped[str] = mapped_column(String(100), index=True)
 
     # Campaign terms
     objective: Mapped[str] = mapped_column(String(100))
-    budget_total: Mapped[float] = mapped_column(Float)
+    budget_total: Mapped[float] = mapped_column(Float, index=True)
     budget_spent: Mapped[float] = mapped_column(Float, default=0.0)
     start_date: Mapped[date]
     end_date: Mapped[date]
     excluded_categories: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
 
     # Review outcome — kept on this same row rather than a separate table
-    status: Mapped[str] = mapped_column(String(20), default="pending_review")
+    status: Mapped[str] = mapped_column(String(20), default="pending_review", index=True)
     review_reason: Mapped[str | None] = mapped_column(String(1000), default=None)
     research_notes: Mapped[str | None] = mapped_column(String(2000), default=None)
     reviewed_by: Mapped[str | None] = mapped_column(String(200), default=None)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class Event(Base):
