@@ -16,6 +16,15 @@ body {
   min-height: 100svh;
 }
 
+/* Tailwind v4's preflight dropped v3's default cursor:pointer on buttons
+   (buttons now get the browser's native cursor:default) -- restore it
+   globally so every button in the app shows a pointer on hover, except
+   ones actually disabled (those should look non-interactive, not just
+   copy the enabled cursor). */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
 /* Bigger jump than Tailwind's default animate-bounce (~25% of the
    element's own size, quite subtle for a small dot) -- used by Spinner. */
 @keyframes bounce-jump {

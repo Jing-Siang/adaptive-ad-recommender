@@ -4,6 +4,7 @@ import { completeOnboarding, fetchMe, resetProfile } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 import { OnboardingChat } from '../components/OnboardingChat'
 import { Feed } from '../components/Feed'
+import { Spinner } from '../components/Spinner'
 
 export function OnboardingFeedPage() {
   const { user, updateUser } = useAuth()
@@ -14,6 +15,7 @@ export function OnboardingFeedPage() {
   // docs/auth_plan.md and app/serving/onboarding_api.py's /complete route).
   const [mode, setMode] = useState<'onboarding' | 'feed'>(user?.onboarding_completed ? 'feed' : 'onboarding')
   const [chatKey, setChatKey] = useState(0)
+  const [resetting, setResetting] = useState(false)
 
   // App.tsx never renders this page without a logged-in user.
   if (!user) return null
@@ -25,11 +27,16 @@ export function OnboardingFeedPage() {
   }
 
   async function handleReset() {
-    await resetProfile()
-    const updated = await fetchMe()
-    updateUser(updated)
-    setChatKey((k) => k + 1)
-    setMode('onboarding')
+    setResetting(true)
+    try {
+      await resetProfile()
+      const updated = await fetchMe()
+      updateUser(updated)
+      setChatKey((k) => k + 1)
+      setMode('onboarding')
+    } finally {
+      setResetting(false)
+    }
   }
 
   return (
@@ -39,10 +46,21 @@ export function OnboardingFeedPage() {
           <button
             type="button"
             onClick={handleReset}
-            className="flex items-center gap-1.5 rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+            disabled={resetting}
+            className="grid place-items-center rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-60 disabled:hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 dark:disabled:hover:bg-stone-800"
           >
-            <RotateCcw size={16} />
-            Restart onboarding
+            {/* Both states occupy the same grid cell -- the button's width
+                is always driven by the wider one (icon + text), so
+                swapping to the smaller spinner never shrinks it.
+                visibility (not conditional rendering) keeps the hidden
+                one contributing to that sizing. */}
+            <span className={`col-start-1 row-start-1 flex items-center gap-1.5 ${resetting ? 'invisible' : ''}`}>
+              <RotateCcw size={16} />
+              Restart onboarding
+            </span>
+            <span className={`col-start-1 row-start-1 ${resetting ? '' : 'invisible'}`}>
+              <Spinner label="" />
+            </span>
           </button>
         </div>
         {/* Fades scrolling content out before it disappears under the solid
