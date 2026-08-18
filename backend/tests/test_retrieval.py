@@ -3,8 +3,8 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.models import Event
-from app.serving.retrieval import _recently_shown_campaign_ids, retrieve_candidates
+from app.models import BlocklistEntry, Event
+from app.serving.retrieval import _blocklisted_campaign_ids, _recently_shown_campaign_ids, retrieve_candidates
 
 _TODAY_EPOCH_DAYS = (date.today() - date(1970, 1, 1)).days
 _ELIGIBILITY_FILTER = {
@@ -47,13 +47,27 @@ def test_recently_shown_campaign_ids_respects_time_window(db, campaign):
         db.commit()
 
 
+def test_blocklisted_campaign_ids_reads_from_postgres(db, user, campaign):
+    entry = BlocklistEntry(user_id=user.id, campaign_id=campaign.id)
+    db.add(entry)
+    db.commit()
+
+    try:
+        assert _blocklisted_campaign_ids(db, str(user.id)) == {campaign.id}
+    finally:
+        db.delete(entry)
+        db.commit()
+
+    assert _blocklisted_campaign_ids(db, str(user.id)) == set()
+
+
 @patch("app.serving.retrieval._recently_shown_campaign_ids", return_value=set())
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value={1})
 @patch("app.serving.retrieval.get_index")
-@patch("app.serving.retrieval.fetch_metadata", return_value={})
+@patch("app.serving.retrieval._blocklisted_campaign_ids", return_value=set())
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
 def test_retrieve_candidates_maps_matches_to_ad_candidates(
-    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible, mock_recent
+    mock_fetch_vector, mock_blocklisted, mock_get_index, mock_eligible, mock_recent
 ):
     """A single eligible Pinecone match maps to an AdCandidate with the right
     fields; the Pinecone query asks for exactly top_k, no oversampling."""
@@ -92,10 +106,10 @@ def test_retrieve_candidates_maps_matches_to_ad_candidates(
 @patch("app.serving.retrieval._recently_shown_campaign_ids", return_value=set())
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value=set())
 @patch("app.serving.retrieval.get_index")
-@patch("app.serving.retrieval.fetch_metadata", return_value={})
+@patch("app.serving.retrieval._blocklisted_campaign_ids", return_value=set())
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
 def test_retrieve_candidates_empty_result(
-    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible, mock_recent
+    mock_fetch_vector, mock_blocklisted, mock_get_index, mock_eligible, mock_recent
 ):
     """No Pinecone matches at all -> an empty candidate list, not an error."""
     mock_index = MagicMock()
@@ -111,10 +125,10 @@ def test_retrieve_candidates_empty_result(
 @patch("app.serving.retrieval._recently_shown_campaign_ids", return_value=set())
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value={2})
 @patch("app.serving.retrieval.get_index")
-@patch("app.serving.retrieval.fetch_metadata", return_value={})
+@patch("app.serving.retrieval._blocklisted_campaign_ids", return_value=set())
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
 def test_retrieve_candidates_filters_out_ineligible_campaigns(
-    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible, mock_recent
+    mock_fetch_vector, mock_blocklisted, mock_get_index, mock_eligible, mock_recent
 ):
     """Campaign 1 is a closer vector match, but only campaign 2 is eligible
     (e.g. campaign 1's budget is exhausted or it's expired) -- it should be
@@ -140,10 +154,10 @@ def test_retrieve_candidates_filters_out_ineligible_campaigns(
 @patch("app.serving.retrieval._recently_shown_campaign_ids", return_value=set())
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value={2})
 @patch("app.serving.retrieval.get_index")
-@patch("app.serving.retrieval.fetch_metadata", return_value={"blocklist": ["1"]})
+@patch("app.serving.retrieval._blocklisted_campaign_ids", return_value={1})
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
 def test_retrieve_candidates_passes_blocklist_as_pinecone_filter(
-    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible, mock_recent
+    mock_fetch_vector, mock_blocklisted, mock_get_index, mock_eligible, mock_recent
 ):
     """The blocklist is passed to Pinecone as a query-time $nin filter on
     campaign_id, not applied as a Python post-filter -- Pinecone's
@@ -169,10 +183,10 @@ def test_retrieve_candidates_passes_blocklist_as_pinecone_filter(
 @patch("app.serving.retrieval._recently_shown_campaign_ids", return_value={3, 4})
 @patch("app.serving.retrieval._eligible_campaign_ids", return_value=set())
 @patch("app.serving.retrieval.get_index")
-@patch("app.serving.retrieval.fetch_metadata", return_value={"blocklist": ["1"]})
+@patch("app.serving.retrieval._blocklisted_campaign_ids", return_value={1})
 @patch("app.serving.retrieval.fetch_vector", return_value=[0.1, 0.2, 0.3])
 def test_retrieve_candidates_combines_blocklist_and_recently_shown_in_filter(
-    mock_fetch_vector, mock_fetch_metadata, mock_get_index, mock_eligible, mock_recent
+    mock_fetch_vector, mock_blocklisted, mock_get_index, mock_eligible, mock_recent
 ):
     """Blocklisted and recently-shown campaign IDs are merged into one
     $nin filter passed to Pinecone."""

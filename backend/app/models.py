@@ -126,6 +126,25 @@ class Event(Base):
     campaign: Mapped["Campaign"] = relationship()
 
 
+class BlocklistEntry(Base):
+    """Permanent per-user "do not show this ad again" exclusion -- not a
+    learning signal (no profile-vector nudge, no Event row, see
+    serving/users.py's do_not_show), just a row checked in
+    retrieve_candidates. Previously lived in Pinecone metadata as a JSON
+    array on the user's profile vector, which meant every add was a
+    fetch-then-write round trip (measured ~3s: a full metadata read, plus
+    the write). A plain table makes an add a single INSERT with no
+    read-before-write."""
+
+    __tablename__ = "blocklist_entries"
+    __table_args__ = (UniqueConstraint("user_id", "campaign_id", name="uq_blocklist_user_campaign"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Reaction(Base):
     """The user's *current* reaction to an ad -- one row per (user_id,
     campaign_id), updated in place on switch/re-click. Separate from Event

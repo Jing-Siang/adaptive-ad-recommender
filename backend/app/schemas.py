@@ -191,7 +191,7 @@ class ReportRequest(BaseModel):
 class DoNotShowRequest(BaseModel):
     """Request body for POST /users/me/do-not-show -- a permanent per-user
     exclusion, not a learning signal (no profile nudge, no event log
-    entry). Stored in the user's Pinecone metadata, checked during
+    entry). Stored as a Postgres blocklist_entries row, checked during
     retrieval (see retrieval.py)."""
 
     ad_id: str

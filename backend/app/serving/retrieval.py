@@ -3,8 +3,8 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.core.logging_utils import log_event
-from app.core.vector_store import fetch_metadata, fetch_vector, get_index
-from app.models import Campaign, Event
+from app.core.vector_store import fetch_vector, get_index
+from app.models import BlocklistEntry, Campaign, Event
 from app.schemas import AdCandidate
 
 # Debezium/Postgres logical-replication encodes `date` columns as days since
@@ -43,6 +43,15 @@ def _eligible_campaign_ids(db: Session, candidate_ids: list[int]) -> set[int]:
         .all()
     )
     return {row.id for row in rows}
+
+
+def _blocklisted_campaign_ids(db: Session, user_id: str) -> set[int]:
+    """Permanent per-user "do not show again" exclusions -- see
+    serving/users.py's do_not_show. Lives in Postgres (blocklist_entries),
+    not Pinecone metadata -- a plain indexed query here, not a Pinecone
+    round trip."""
+    rows = db.query(BlocklistEntry.campaign_id).filter(BlocklistEntry.user_id == int(user_id)).all()
+    return {row.campaign_id for row in rows}
 
 
 def _recently_shown_campaign_ids(db: Session, user_id: str) -> set[int]:
@@ -88,8 +97,7 @@ def retrieve_candidates(
         if vector is None:
             raise ValueError(f"no profile found for user '{user_id}' -- onboarding must run first")
 
-    blocklist = {int(x) for x in (fetch_metadata(user_id, namespace="users") or {}).get("blocklist", [])}
-    excluded_ids = blocklist | _recently_shown_campaign_ids(db, user_id)
+    excluded_ids = _blocklisted_campaign_ids(db, user_id) | _recently_shown_campaign_ids(db, user_id)
 
     index = get_index()
     query_kwargs = {
