@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -52,20 +53,30 @@ def create_campaign(
     return campaign
 
 
+_SORTABLE_COLUMNS = {
+    "created_at": Campaign.created_at,
+    "headline": Campaign.headline,
+    "budget_total": Campaign.budget_total,
+}
+
+
 @router.get("", response_model=CampaignListResponse)
 def list_campaigns(
     status: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    sort_by: Literal["created_at", "headline", "budget_total"] = "created_at",
+    sort_dir: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> CampaignListResponse:
     """List campaigns, paginated, optionally filtered by status —
     status=needs_review is the moderator queue — and/or category, and/or
-    searched by headline (case-insensitive substring). Filtering/searching/
-    paging all happen in the query itself, not after loading rows into
-    Python, since the catalog is thousands of rows."""
+    searched by headline (case-insensitive substring), sorted by any of
+    _SORTABLE_COLUMNS. Filtering/searching/sorting/paging all happen in the
+    query itself, not after loading rows into Python, since the catalog is
+    thousands of rows."""
     query = db.query(Campaign)
     if status:
         query = query.filter_by(status=status)
@@ -76,12 +87,9 @@ def list_campaigns(
 
     total = query.count()
     total_pages = max(1, -(-total // page_size))  # ceil division
-    items = (
-        query.order_by(Campaign.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    column = _SORTABLE_COLUMNS[sort_by]
+    order = column.asc() if sort_dir == "asc" else column.desc()
+    items = query.order_by(order).offset((page - 1) * page_size).limit(page_size).all()
     return CampaignListResponse(items=items, total=total, page=page, page_size=page_size, total_pages=total_pages)
 
 

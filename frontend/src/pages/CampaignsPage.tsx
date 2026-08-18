@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Info, Plus } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, ChevronUp, Info, Plus } from 'lucide-react'
 import { listCampaigns } from '../api'
 import type { CampaignListResponse } from '../types'
 import { CAMPAIGN_CATEGORIES, categoryLabel } from '../categories'
@@ -12,8 +12,27 @@ const STATUS_OPTIONS = ['pending_review', 'needs_review', 'active', 'rejected', 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const SEARCH_DEBOUNCE_MS = 350
 
-const filterSelectClass =
-  'w-full rounded border border-stone-300 bg-white px-2 py-1 text-xs outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:focus:border-stone-500'
+type SortBy = 'created_at' | 'headline' | 'budget_total'
+
+// Matches CampaignFormModal's inputClass -- the app's one established
+// input/select style -- just with tighter padding so it fits in a table's
+// filter row instead of a form.
+const filterInputClass = 'rounded border border-stone-300 px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-800'
+
+/** Windowed page list with '…' gaps -- e.g. [1, '…', 4, 5, 6, '…', 20] --
+ * so a catalog with hundreds of pages doesn't render hundreds of buttons. */
+function getPageNumbers(current: number, total: number): (number | '…')[] {
+  const keep = new Set([1, total, current - 1, current, current + 1])
+  const pages = [...keep].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b)
+  const result: (number | '…')[] = []
+  let prev = 0
+  for (const p of pages) {
+    if (prev && p - prev > 1) result.push('…')
+    result.push(p)
+    prev = p
+  }
+  return result
+}
 
 export function CampaignsPage() {
   const [data, setData] = useState<CampaignListResponse | null>(null)
@@ -25,6 +44,8 @@ export function CampaignsPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [status, setStatus] = useState('')
+  const [sortBy, setSortBy] = useState<SortBy>('created_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -36,12 +57,12 @@ export function CampaignsPage() {
     return () => clearTimeout(id)
   }, [searchInput])
 
-  // Any filter change invalidates the current page number -- e.g. page 5 of
-  // an unfiltered list may not exist once a search/category/status narrows
-  // the set.
+  // Any filter/sort change invalidates the current page number -- e.g. page
+  // 5 of an unfiltered list may not exist once a search/category/status
+  // narrows the set, and a new sort order starts back at the top.
   useEffect(() => {
     setPage(1)
-  }, [search, category, status, pageSize])
+  }, [search, category, status, sortBy, sortDir, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -49,6 +70,8 @@ export function CampaignsPage() {
       status: status || undefined,
       category: category || undefined,
       search: search || undefined,
+      sortBy,
+      sortDir,
       page,
       pageSize,
     })
@@ -64,7 +87,16 @@ export function CampaignsPage() {
     return () => {
       cancelled = true
     }
-  }, [search, category, status, page, pageSize, refreshKey])
+  }, [search, category, status, sortBy, sortDir, page, pageSize, refreshKey])
+
+  function toggleSort(column: SortBy) {
+    if (sortBy === column) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortBy(column)
+      setSortDir('asc')
+    }
+  }
 
   if (loading && !data) {
     return (
@@ -78,6 +110,11 @@ export function CampaignsPage() {
   const totalPages = data?.total_pages ?? 1
   const total = data?.total ?? 0
   const hasFilters = Boolean(search || category || status)
+
+  function sortIcon(column: SortBy) {
+    if (sortBy !== column) return <ChevronsUpDown size={14} className="text-stone-300 dark:text-stone-600" />
+    return sortDir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-6">
@@ -102,27 +139,45 @@ export function CampaignsPage() {
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      <div className="flex items-center justify-between text-sm text-stone-600 dark:text-stone-400">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-stone-600 dark:text-stone-400">
         <span>Total: {total}</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
             aria-label="Previous page"
-            className="grid place-items-center rounded-lg border border-stone-300 p-1.5 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-stone-700 dark:hover:bg-stone-800"
+            className="grid place-items-center rounded-lg border border-stone-300 bg-stone-50 p-1.5 text-stone-700 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 dark:disabled:hover:bg-stone-800"
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="min-w-20 text-center">
-            Page {page} of {totalPages}
-          </span>
+          {getPageNumbers(page, totalPages).map((p, i) =>
+            p === '…' ? (
+              <span key={`ellipsis-${i}`} className="px-1.5 text-stone-400 dark:text-stone-600">
+                …
+              </span>
+            ) : (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPage(p)}
+                aria-current={p === page ? 'page' : undefined}
+                className={`min-w-8 rounded-lg px-2 py-1.5 text-sm font-medium transition ${
+                  p === page
+                    ? 'bg-stone-100 text-stone-900 dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-600 hover:bg-stone-100/60 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-700/50 dark:hover:text-stone-100'
+                }`}
+              >
+                {p}
+              </button>
+            ),
+          )}
           <button
             type="button"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
             aria-label="Next page"
-            className="grid place-items-center rounded-lg border border-stone-300 p-1.5 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-stone-700 dark:hover:bg-stone-800"
+            className="grid place-items-center rounded-lg border border-stone-300 bg-stone-50 p-1.5 text-stone-700 hover:bg-stone-100 disabled:opacity-40 disabled:hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 dark:disabled:hover:bg-stone-800"
           >
             <ChevronRight size={16} />
           </button>
@@ -130,7 +185,7 @@ export function CampaignsPage() {
         <select
           value={pageSize}
           onChange={(e) => setPageSize(Number(e.target.value))}
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:focus:border-stone-500"
+          className={filterInputClass}
         >
           {PAGE_SIZE_OPTIONS.map((n) => (
             <option key={n} value={n}>
@@ -144,10 +199,26 @@ export function CampaignsPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
-              <th className="py-2 pr-4">Headline</th>
+              <th className="py-2 pr-4">
+                <button
+                  type="button"
+                  onClick={() => toggleSort('headline')}
+                  className="flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-200"
+                >
+                  Headline {sortIcon('headline')}
+                </button>
+              </th>
               <th className="py-2 pr-4">Category</th>
               <th className="py-2 pr-4">Status</th>
-              <th className="py-2 pr-4">Budget</th>
+              <th className="py-2 pr-4">
+                <button
+                  type="button"
+                  onClick={() => toggleSort('budget_total')}
+                  className="flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-200"
+                >
+                  Budget {sortIcon('budget_total')}
+                </button>
+              </th>
               <th className="py-2 pr-4">Review reason</th>
             </tr>
             {/* Inline per-column filters, directly under the headers they
@@ -161,11 +232,15 @@ export function CampaignsPage() {
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="Filter"
-                  className={filterSelectClass}
+                  className={`w-full ${filterInputClass}`}
                 />
               </th>
               <th className="py-1.5 pr-4 font-normal">
-                <select value={category} onChange={(e) => setCategory(e.target.value)} className={filterSelectClass}>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className={`w-full ${filterInputClass}`}
+                >
                   <option value="">All</option>
                   {CAMPAIGN_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
@@ -175,7 +250,11 @@ export function CampaignsPage() {
                 </select>
               </th>
               <th className="py-1.5 pr-4 font-normal">
-                <select value={status} onChange={(e) => setStatus(e.target.value)} className={filterSelectClass}>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  className={`w-full ${filterInputClass}`}
+                >
                   <option value="">All</option>
                   {STATUS_OPTIONS.map((s) => (
                     <option key={s} value={s}>

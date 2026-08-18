@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -92,6 +93,46 @@ def test_list_campaigns_searches_by_headline(db, campaign):
 
     resp_miss = client.get("/campaigns", params={"search": "no such headline text"})
     assert campaign.id not in [c["id"] for c in resp_miss.json()["items"]]
+
+
+def test_list_campaigns_sorts_by_headline_and_budget(db, advertiser_user):
+    def _campaign(headline: str, budget_total: float) -> Campaign:
+        c = Campaign(
+            user_id=advertiser_user.id,
+            headline=headline,
+            description="pytest sort description",
+            category="hardware",
+            objective="conversions",
+            budget_total=budget_total,
+            budget_spent=0.0,
+            start_date=date(2020, 1, 1),
+            end_date=date(2099, 1, 1),
+            excluded_categories=[],
+            status="active",
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        return c
+
+    low = _campaign("Zzz Sort Test Low Budget", 5.0)
+    high = _campaign("Aaa Sort Test High Budget", 50.0)
+    try:
+        by_headline = client.get(
+            "/campaigns", params={"search": "Sort Test", "sort_by": "headline", "sort_dir": "asc"}
+        ).json()["items"]
+        headline_ids = [c["id"] for c in by_headline]
+        assert headline_ids.index(high.id) < headline_ids.index(low.id)  # "Aaa" before "Zzz"
+
+        by_budget = client.get(
+            "/campaigns", params={"search": "Sort Test", "sort_by": "budget_total", "sort_dir": "desc"}
+        ).json()["items"]
+        budget_ids = [c["id"] for c in by_budget]
+        assert budget_ids.index(high.id) < budget_ids.index(low.id)  # 50 before 5
+    finally:
+        db.delete(low)
+        db.delete(high)
+        db.commit()
 
 
 def test_list_campaigns_paginates(db, campaign):
