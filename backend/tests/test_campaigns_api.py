@@ -66,10 +66,34 @@ def test_list_campaigns_filters_by_status(db, campaign):
 
     resp = client.get("/campaigns", params={"status": "needs_review"})
     assert resp.status_code == 200
-    assert campaign.id in [c["id"] for c in resp.json()]
+    body = resp.json()
+    assert campaign.id in [c["id"] for c in body["items"]]
 
     resp_other = client.get("/campaigns", params={"status": "rejected"})
-    assert campaign.id not in [c["id"] for c in resp_other.json()]
+    assert campaign.id not in [c["id"] for c in resp_other.json()["items"]]
+
+
+def test_list_campaigns_searches_by_headline(db, campaign):
+    campaign.headline = "Unique Pytest Search Headline"
+    db.commit()
+
+    resp = client.get("/campaigns", params={"search": "pytest search"})
+    assert resp.status_code == 200
+    assert campaign.id in [c["id"] for c in resp.json()["items"]]
+
+    resp_miss = client.get("/campaigns", params={"search": "no such headline text"})
+    assert campaign.id not in [c["id"] for c in resp_miss.json()["items"]]
+
+
+def test_list_campaigns_paginates(db, campaign):
+    resp = client.get("/campaigns", params={"page": 1, "page_size": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page"] == 1
+    assert body["page_size"] == 1
+    assert len(body["items"]) == 1
+    assert body["total"] >= 1
+    assert body["total_pages"] >= 1
 
 
 def test_moderate_campaign_approve_activates(db, campaign, moderator_user):

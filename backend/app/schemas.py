@@ -392,6 +392,18 @@ class CampaignResponse(BaseModel):
     created_at: datetime
 
 
+class CampaignListResponse(BaseModel):
+    """Response for GET /campaigns — paginated so the campaigns table never
+    has to pull the whole catalog (thousands of rows) to the client just to
+    filter/search a page of it."""
+
+    items: list[CampaignResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 class ModerationRequest(BaseModel):
     """Request body for POST /campaigns/{id}/moderate — a human resolving a
     needs_review campaign (require_role("moderator")). reviewed_by is no

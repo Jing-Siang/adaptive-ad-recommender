@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_role
@@ -9,7 +9,13 @@ from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
 from app.models import Campaign, User
 from app.core.queue import campaign_review_queue
-from app.schemas import CampaignCreateRequest, CampaignResponse, CurrentUser, ModerationRequest
+from app.schemas import (
+    CampaignCreateRequest,
+    CampaignListResponse,
+    CampaignResponse,
+    CurrentUser,
+    ModerationRequest,
+)
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -46,14 +52,34 @@ def create_campaign(
     return campaign
 
 
-@router.get("", response_model=list[CampaignResponse])
-def list_campaigns(status: str | None = None, db: Session = Depends(get_db)) -> list[Campaign]:
-    """List campaigns, optionally filtered by status — status=needs_review is the
-    moderator queue."""
+@router.get("", response_model=CampaignListResponse)
+def list_campaigns(
+    status: str | None = None,
+    search: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> CampaignListResponse:
+    """List campaigns, paginated, optionally filtered by status —
+    status=needs_review is the moderator queue — and/or searched by headline
+    (case-insensitive substring). Filtering/searching/paging all happen in
+    the query itself, not after loading rows into Python, since the catalog
+    is thousands of rows."""
     query = db.query(Campaign)
     if status:
         query = query.filter_by(status=status)
-    return query.order_by(Campaign.created_at.desc()).all()
+    if search:
+        query = query.filter(Campaign.headline.ilike(f"%{search}%"))
+
+    total = query.count()
+    total_pages = max(1, -(-total // page_size))  # ceil division
+    items = (
+        query.order_by(Campaign.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return CampaignListResponse(items=items, total=total, page=page, page_size=page_size, total_pages=total_pages)
 
 
 @router.post("/{campaign_id}/moderate", response_model=CampaignResponse)

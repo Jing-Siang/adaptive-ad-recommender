@@ -2,6 +2,7 @@ import type {
   Account,
   BatchRecommendationResponse,
   CampaignCreateRequest,
+  CampaignListResponse,
   CampaignResponse,
   ChatMessage,
   ModerationRequest,
@@ -238,9 +239,21 @@ export function createCampaign(payload: CampaignCreateRequest): Promise<Campaign
   return request('/campaigns', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-export function listCampaigns(status?: string): Promise<CampaignResponse[]> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : ''
-  return request(`/campaigns${query}`)
+export interface ListCampaignsParams {
+  status?: string
+  search?: string
+  page?: number
+  pageSize?: number
+}
+
+export function listCampaigns(params: ListCampaignsParams = {}): Promise<CampaignListResponse> {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  if (params.search) query.set('search', params.search)
+  if (params.page) query.set('page', String(params.page))
+  if (params.pageSize) query.set('page_size', String(params.pageSize))
+  const qs = query.toString()
+  return request(`/campaigns${qs ? `?${qs}` : ''}`)
 }
 
 export function moderateCampaign(id: number, payload: ModerationRequest): Promise<CampaignResponse> {

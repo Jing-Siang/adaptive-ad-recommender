@@ -137,6 +137,14 @@ export interface CampaignResponse {
   created_at: string
 }
 
+export interface CampaignListResponse {
+  items: CampaignResponse[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
 export interface ModerationRequest {
   outcome: 'approved' | 'rejected'
   reason: string

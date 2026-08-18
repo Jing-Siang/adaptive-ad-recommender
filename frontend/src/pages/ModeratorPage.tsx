@@ -15,8 +15,8 @@ export function ModeratorPage() {
 
   async function refresh() {
     try {
-      const data = await listCampaigns('needs_review')
-      setCampaigns(data.sort((a, b) => a.id - b.id))
+      const data = await listCampaigns({ status: 'needs_review', pageSize: 100 })
+      setCampaigns(data.items.sort((a, b) => a.id - b.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
