@@ -10,7 +10,6 @@ export function ModeratorPage() {
   const [campaigns, setCampaigns] = useState<CampaignResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [reviewerName, setReviewerName] = useState('Moderator')
   const [reasons, setReasons] = useState<Record<number, string>>({})
   const [submittingId, setSubmittingId] = useState<number | null>(null)
 
@@ -38,7 +37,7 @@ export function ModeratorPage() {
     setSubmittingId(id)
     setError(null)
     try {
-      await moderateCampaign(id, { outcome, reason, reviewed_by: reviewerName || 'Moderator' })
+      await moderateCampaign(id, { outcome, reason })
       setCampaigns((cs) => cs.filter((c) => c.id !== id))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -61,22 +60,13 @@ export function ModeratorPage() {
         <h1 className="mt-3 text-2xl font-semibold">Moderator Queue</h1>
         <Tooltip
           side="right"
-          content="Campaigns the AI reviewer flagged for a human decision. Your name is recorded with the decision for the audit trail."
+          content="Campaigns the AI reviewer flagged for a human decision. Your account name is recorded with the decision for the audit trail."
         >
           <span className="mt-3.5 text-stone-500 dark:text-stone-400">
             <Info size={16} />
           </span>
         </Tooltip>
       </div>
-
-      <label className="flex max-w-xs flex-col gap-1 text-sm">
-        Your name
-        <input
-          value={reviewerName}
-          onChange={(e) => setReviewerName(e.target.value)}
-          className="rounded border border-stone-300 px-3 py-2 dark:border-stone-700 dark:bg-stone-800"
-        />
-      </label>
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 

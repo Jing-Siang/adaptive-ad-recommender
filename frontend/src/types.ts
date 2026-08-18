@@ -140,5 +140,4 @@ export interface CampaignResponse {
 export interface ModerationRequest {
   outcome: 'approved' | 'rejected'
   reason: string
-  reviewed_by: string
 }

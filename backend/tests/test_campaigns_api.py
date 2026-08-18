@@ -78,14 +78,14 @@ def test_moderate_campaign_approve_activates(db, campaign, moderator_user):
 
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
-        json={"outcome": "approved", "reason": "looks fine to a human", "reviewed_by": "pytest-moderator"},
+        json={"outcome": "approved", "reason": "looks fine to a human"},
         headers=auth_header(moderator_user),
     )
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "active"
-    assert data["reviewed_by"] == "pytest-moderator"
+    assert data["reviewed_by"] == moderator_user.display_name
     assert data["review_reason"] == "looks fine to a human"
 
 
@@ -95,7 +95,7 @@ def test_moderate_campaign_reject_sets_status(db, campaign, moderator_user):
 
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
-        json={"outcome": "rejected", "reason": "violates policy", "reviewed_by": "pytest-moderator"},
+        json={"outcome": "rejected", "reason": "violates policy"},
         headers=auth_header(moderator_user),
     )
 
@@ -107,7 +107,7 @@ def test_moderate_campaign_wrong_status_returns_409(db, campaign, moderator_user
     # campaign fixture defaults to status="active", not needs_review
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
-        json={"outcome": "approved", "reason": "x", "reviewed_by": "pytest-moderator"},
+        json={"outcome": "approved", "reason": "x"},
         headers=auth_header(moderator_user),
     )
     assert resp.status_code == 409
@@ -116,7 +116,7 @@ def test_moderate_campaign_wrong_status_returns_409(db, campaign, moderator_user
 def test_moderate_campaign_not_found_returns_404(moderator_user):
     resp = client.post(
         "/campaigns/999999999/moderate",
-        json={"outcome": "approved", "reason": "x", "reviewed_by": "pytest-moderator"},
+        json={"outcome": "approved", "reason": "x"},
         headers=auth_header(moderator_user),
     )
     assert resp.status_code == 404
@@ -139,7 +139,7 @@ def test_moderate_campaign_rejects_non_moderator_role(db, campaign, advertiser_u
 
     resp = client.post(
         f"/campaigns/{campaign.id}/moderate",
-        json={"outcome": "approved", "reason": "x", "reviewed_by": "x"},
+        json={"outcome": "approved", "reason": "x"},
         headers=auth_header(advertiser_user),
     )
     assert resp.status_code == 403

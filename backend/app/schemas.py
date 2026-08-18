@@ -394,11 +394,10 @@ class CampaignResponse(BaseModel):
 
 class ModerationRequest(BaseModel):
     """Request body for POST /campaigns/{id}/moderate — a human resolving a
-    needs_review campaign (require_role("moderator")). reviewed_by is
-    still a separate freeform name for the audit trail, not derived from
-    the authenticated account -- a deliberate choice to keep attribution
-    decoupled from login identity."""
+    needs_review campaign (require_role("moderator")). reviewed_by is no
+    longer a request field -- it's derived from the authenticated
+    moderator's own account (display_name), not caller-supplied freeform
+    text, now that real accounts exist."""
 
     outcome: Literal["approved", "rejected"]
     reason: str
-    reviewed_by: str

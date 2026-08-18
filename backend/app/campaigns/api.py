@@ -7,7 +7,7 @@ from app.core.auth import require_role
 from app.core.db import get_db
 from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
-from app.models import Campaign
+from app.models import Campaign, User
 from app.core.queue import campaign_review_queue
 from app.schemas import CampaignCreateRequest, CampaignResponse, CurrentUser, ModerationRequest
 
@@ -61,23 +61,30 @@ def moderate_campaign(
     campaign_id: int,
     request: ModerationRequest,
     db: Session = Depends(get_db),
-    _current: CurrentUser = Depends(require_role("moderator")),
+    current: CurrentUser = Depends(require_role("moderator")),
 ) -> Campaign:
     """Human moderator resolves a needs_review campaign. Requires the
-    moderator role (see docs/auth_plan.md) -- reviewed_by is still a
-    freeform name, not yet derived from the authenticated account, since
-    that's a separate change from just closing the access-control gap.
-    Embedding/indexing into Pinecone happens asynchronously via
-    pinecone_sync_consumer.py, not here (see docs/kafka_cdc_plan.md)."""
+    moderator role (see docs/auth_plan.md). reviewed_by is derived from the
+    authenticated moderator's own account (display_name), not a
+    caller-supplied field -- now that real accounts exist, a freeform name
+    added nothing a verified account doesn't already give more reliably.
+    Looked up fresh from Postgres rather than trusting a JWT claim, since
+    get_current_user's token has no display_name in it and a display name
+    can change without a fresh login. Embedding/indexing into Pinecone
+    happens asynchronously via pinecone_sync_consumer.py, not here (see
+    docs/kafka_cdc_plan.md)."""
     campaign = db.get(Campaign, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=404, detail="campaign not found")
     if campaign.status != "needs_review":
         raise HTTPException(status_code=409, detail=f"campaign is '{campaign.status}', not awaiting review")
 
+    reviewer = db.get(User, current.id)
+    reviewed_by = reviewer.display_name
+
     campaign.status = "active" if request.outcome == "approved" else "rejected"
     campaign.review_reason = request.reason
-    campaign.reviewed_by = request.reviewed_by
+    campaign.reviewed_by = reviewed_by
     campaign.reviewed_at = datetime.now(UTC)
     db.commit()
     db.refresh(campaign)
@@ -86,7 +93,7 @@ def moderate_campaign(
         "campaign_moderated",
         campaign_id=campaign_id,
         outcome=request.outcome,
-        reviewed_by=request.reviewed_by,
+        reviewed_by=reviewed_by,
     )
 
     return campaign
