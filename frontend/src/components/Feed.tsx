@@ -59,7 +59,7 @@ export function Feed() {
       ([entry]) => {
         if (entry.isIntersecting) loadMore()
       },
-      { root, rootMargin: '800px' },
+      { root, rootMargin: '2000px' },
     )
     observer.observe(el)
     return () => observer.disconnect()
