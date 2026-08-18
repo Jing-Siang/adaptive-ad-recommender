@@ -42,6 +42,8 @@ export function CampaignsPage() {
 
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [reviewReasonSearchInput, setReviewReasonSearchInput] = useState('')
+  const [reviewReasonSearch, setReviewReasonSearch] = useState('')
   const [category, setCategory] = useState('')
   const [status, setStatus] = useState('')
   const [sortBy, setSortBy] = useState<SortBy>('created_at')
@@ -50,19 +52,24 @@ export function CampaignsPage() {
   const [pageSize, setPageSize] = useState(20)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // Debounce the search box so typing doesn't fire a request per keystroke --
-  // the actual query param only updates once typing pauses.
+  // Debounce the search boxes so typing doesn't fire a request per
+  // keystroke -- the actual query params only update once typing pauses.
   useEffect(() => {
     const id = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(id)
   }, [searchInput])
+
+  useEffect(() => {
+    const id = setTimeout(() => setReviewReasonSearch(reviewReasonSearchInput.trim()), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(id)
+  }, [reviewReasonSearchInput])
 
   // Any filter/sort change invalidates the current page number -- e.g. page
   // 5 of an unfiltered list may not exist once a search/category/status
   // narrows the set, and a new sort order starts back at the top.
   useEffect(() => {
     setPage(1)
-  }, [search, category, status, sortBy, sortDir, pageSize])
+  }, [search, reviewReasonSearch, category, status, sortBy, sortDir, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -70,6 +77,7 @@ export function CampaignsPage() {
       status: status || undefined,
       category: category || undefined,
       search: search || undefined,
+      reviewReasonSearch: reviewReasonSearch || undefined,
       sortBy,
       sortDir,
       page,
@@ -87,7 +95,7 @@ export function CampaignsPage() {
     return () => {
       cancelled = true
     }
-  }, [search, category, status, sortBy, sortDir, page, pageSize, refreshKey])
+  }, [search, reviewReasonSearch, category, status, sortBy, sortDir, page, pageSize, refreshKey])
 
   function toggleSort(column: SortBy) {
     if (sortBy === column) {
@@ -109,7 +117,7 @@ export function CampaignsPage() {
   const campaigns = data?.items ?? []
   const totalPages = data?.total_pages ?? 1
   const total = data?.total ?? 0
-  const hasFilters = Boolean(search || category || status)
+  const hasFilters = Boolean(search || reviewReasonSearch || category || status)
 
   function sortIcon(column: SortBy) {
     if (sortBy !== column) return <ChevronsUpDown size={14} className="text-stone-300 dark:text-stone-600" />
@@ -238,7 +246,7 @@ export function CampaignsPage() {
                   type="text"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Filter"
+                  placeholder="Search headline…"
                   className={`w-full ${filterInputClass}`}
                 />
               </th>
@@ -271,7 +279,15 @@ export function CampaignsPage() {
                 </select>
               </th>
               <th className="py-1.5 pr-4" />
-              <th className="py-1.5 pr-4" />
+              <th className="py-1.5 pr-4 font-normal">
+                <input
+                  type="text"
+                  value={reviewReasonSearchInput}
+                  onChange={(e) => setReviewReasonSearchInput(e.target.value)}
+                  placeholder="Search review reason…"
+                  className={`w-full ${filterInputClass}`}
+                />
+              </th>
             </tr>
           </thead>
           <tbody>

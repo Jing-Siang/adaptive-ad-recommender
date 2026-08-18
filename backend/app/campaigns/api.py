@@ -65,6 +65,7 @@ def list_campaigns(
     status: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    review_reason_search: str | None = None,
     sort_by: Literal["created_at", "headline", "budget_total"] = "created_at",
     sort_dir: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
@@ -73,10 +74,11 @@ def list_campaigns(
 ) -> CampaignListResponse:
     """List campaigns, paginated, optionally filtered by status —
     status=needs_review is the moderator queue — and/or category, and/or
-    searched by headline (case-insensitive substring), sorted by any of
-    _SORTABLE_COLUMNS. Filtering/searching/sorting/paging all happen in the
-    query itself, not after loading rows into Python, since the catalog is
-    thousands of rows."""
+    searched by headline and/or review_reason (case-insensitive substring,
+    independent of each other), sorted by any of _SORTABLE_COLUMNS.
+    Filtering/searching/sorting/paging all happen in the query itself, not
+    after loading rows into Python, since the catalog is thousands of
+    rows."""
     query = db.query(Campaign)
     if status:
         query = query.filter_by(status=status)
@@ -84,6 +86,8 @@ def list_campaigns(
         query = query.filter_by(category=category)
     if search:
         query = query.filter(Campaign.headline.ilike(f"%{search}%"))
+    if review_reason_search:
+        query = query.filter(Campaign.review_reason.ilike(f"%{review_reason_search}%"))
 
     total = query.count()
     total_pages = max(1, -(-total // page_size))  # ceil division

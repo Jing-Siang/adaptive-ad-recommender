@@ -95,6 +95,18 @@ def test_list_campaigns_searches_by_headline(db, campaign):
     assert campaign.id not in [c["id"] for c in resp_miss.json()["items"]]
 
 
+def test_list_campaigns_searches_by_review_reason(db, campaign):
+    campaign.review_reason = "Flagged for an unverified health claim"
+    db.commit()
+
+    resp = client.get("/campaigns", params={"review_reason_search": "health claim"})
+    assert resp.status_code == 200
+    assert campaign.id in [c["id"] for c in resp.json()["items"]]
+
+    resp_miss = client.get("/campaigns", params={"review_reason_search": "no such reason text"})
+    assert campaign.id not in [c["id"] for c in resp_miss.json()["items"]]
+
+
 def test_list_campaigns_sorts_by_headline_and_budget(db, advertiser_user):
     def _campaign(headline: str, budget_total: float) -> Campaign:
         c = Campaign(

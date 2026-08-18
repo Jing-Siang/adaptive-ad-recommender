@@ -243,6 +243,7 @@ export interface ListCampaignsParams {
   status?: string
   category?: string
   search?: string
+  reviewReasonSearch?: string
   sortBy?: 'created_at' | 'headline' | 'budget_total'
   sortDir?: 'asc' | 'desc'
   page?: number
@@ -254,6 +255,7 @@ export function listCampaigns(params: ListCampaignsParams = {}): Promise<Campaig
   if (params.status) query.set('status', params.status)
   if (params.category) query.set('category', params.category)
   if (params.search) query.set('search', params.search)
+  if (params.reviewReasonSearch) query.set('review_reason_search', params.reviewReasonSearch)
   if (params.sortBy) query.set('sort_by', params.sortBy)
   if (params.sortDir) query.set('sort_dir', params.sortDir)
   if (params.page) query.set('page', String(params.page))
