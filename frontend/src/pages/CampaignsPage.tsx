@@ -69,22 +69,26 @@ export function CampaignsPage() {
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {campaigns.length === 0 ? (
-        <p className="text-sm text-stone-600 dark:text-stone-400">No campaigns yet.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
-                <th className="py-2 pr-4">Headline</th>
-                <th className="py-2 pr-4">Category</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Budget</th>
-                <th className="py-2 pr-4">Note</th>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
+              <th className="py-2 pr-4">Headline</th>
+              <th className="py-2 pr-4">Category</th>
+              <th className="py-2 pr-4">Status</th>
+              <th className="py-2 pr-4">Budget</th>
+              <th className="py-2 pr-4">Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {campaigns.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-6 text-center text-stone-500 dark:text-stone-500">
+                  No campaigns yet.
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {campaigns.map((c) => (
+            ) : (
+              campaigns.map((c) => (
                 <tr key={c.id} className="border-b border-stone-100 dark:border-stone-900">
                   <td className="py-2 pr-4 font-medium">{c.headline}</td>
                   <td className="py-2 pr-4 text-stone-600 dark:text-stone-400">{categoryLabel(c.category)}</td>
@@ -96,11 +100,11 @@ export function CampaignsPage() {
                   </td>
                   <td className="py-2 pr-4 text-stone-500 dark:text-stone-500">{c.review_reason ?? '—'}</td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {showModal && (
         <CampaignFormModal

@@ -74,26 +74,30 @@ export function PerformancePage() {
 
       <div>
         <h2 className="text-lg font-semibold">Per-campaign breakdown</h2>
-        {campaigns.length === 0 ? (
-          <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">No campaigns yet.</p>
-        ) : (
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
-                  <th className="py-2 pr-4">Campaign</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Impr.</th>
-                  <th className="py-2 pr-4">Likes</th>
-                  <th className="py-2 pr-4">Dislikes</th>
-                  <th className="py-2 pr-4">Conv.</th>
-                  <th className="py-2 pr-4">Reports</th>
-                  <th className="py-2 pr-4">CTR</th>
-                  <th className="py-2 pr-4">Spend</th>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
+                <th className="py-2 pr-4">Campaign</th>
+                <th className="py-2 pr-4">Status</th>
+                <th className="py-2 pr-4">Impr.</th>
+                <th className="py-2 pr-4">Likes</th>
+                <th className="py-2 pr-4">Dislikes</th>
+                <th className="py-2 pr-4">Conv.</th>
+                <th className="py-2 pr-4">Reports</th>
+                <th className="py-2 pr-4">CTR</th>
+                <th className="py-2 pr-4">Spend</th>
+              </tr>
+            </thead>
+            <tbody className="[font-variant-numeric:tabular-nums]">
+              {campaigns.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-6 text-center text-stone-500 dark:text-stone-500">
+                    No campaigns yet.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="[font-variant-numeric:tabular-nums]">
-                {[...campaigns]
+              ) : (
+                [...campaigns]
                   .sort((a, b) => b.impressions - a.impressions)
                   .map((c) => (
                     <tr key={c.campaign_id} className="border-b border-stone-100 dark:border-stone-900">
@@ -109,11 +113,11 @@ export function PerformancePage() {
                       <td className="py-2 pr-4">{formatPct(c.ctr)}</td>
                       <td className="py-2 pr-4">{formatUsd(c.spend)}</td>
                     </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )

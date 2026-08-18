@@ -35,7 +35,27 @@ export function CtrTrendChart({ data }: { data: PerformanceTrendPoint[] }) {
   }, [data])
 
   if (data.length === 0) {
-    return <p className="text-sm text-stone-600 dark:text-stone-400">No activity yet.</p>
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
+              <th className="py-1.5 pr-4">Date</th>
+              <th className="py-1.5 pr-4">Impressions</th>
+              <th className="py-1.5 pr-4">Conversions</th>
+              <th className="py-1.5 pr-4">CTR</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colSpan={4} className="py-6 text-center text-stone-500 dark:text-stone-500">
+                No activity yet.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    )
   }
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
