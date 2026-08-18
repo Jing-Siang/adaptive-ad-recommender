@@ -302,7 +302,7 @@ just a visible new local-dev requirement.
         the reaction.
       - **Unrelated consumer-group backlog**: `pinecone-campaign-sync` is
         a persistent group: by the time this test ran, ~400 messages of
-        unrelated backlog from earlier manual testing this session were
+        unrelated backlog from earlier manual testing were
         sitting in front of it, making the test's runtime depend on
         arbitrary history instead of the thing being tested. Fixed by
         seeking the group's committed offset to the topic's current end
@@ -315,7 +315,7 @@ just a visible new local-dev requirement.
       1 deselected).
 - [x] **Side finding, unrelated to this phase's actual work**: the ad hoc
       `-k "not test_policy_review and not test_ranking"` filtering used
-      throughout this session (to avoid assumed OpenAI cost) was checked
+      in earlier test runs (to avoid assumed OpenAI cost) was checked
       against the actual test files and found to be unnecessary -- both
       are fully mocked already, no real API calls. `make test` now runs
       them normally; the `integration` marker is the only real exclusion
@@ -439,9 +439,10 @@ case) should be roughly **1-1.5s**, since it skips the OpenAI call. Both
 numbers assume the consumer is caught up (lag=0) -- see the next note for
 what happens when it isn't.
 
-**Second operational lesson, more important than the first**: mid-session,
-`kafka-consumer-groups.sh --describe` showed **732** total messages
-backlogged, which looked alarming until traced to its actual cause: this
+**Second operational lesson, more important than the first**: partway
+through this investigation, `kafka-consumer-groups.sh --describe` showed
+**732** total messages backlogged, which looked alarming until traced to
+its actual cause: this
 project's tests run against the real dev Postgres (not an isolated test
 database), so every `pytest` run's fixture-created/deleted campaign rows
 generate real WAL activity that Debezium faithfully captures into Kafka --

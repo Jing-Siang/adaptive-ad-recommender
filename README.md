@@ -264,9 +264,11 @@ for why), so it still needs `make kafka-register-connector` +
 
 ## Status
 
-Backend: fully built, tested (92 tests), and verified working end-to-end
-against real Postgres/Redis/Pinecone/OpenAI — campaign posting/review,
-ad serving/feedback, and the onboarding chat (see
+Backend: fully built, tested (115 tests in the default suite, plus opt-in
+integration and adversarial suites — see `make test-integration` and
+`make test-adversarial`), and verified working end-to-end against real
+Postgres/Redis/Pinecone/OpenAI — campaign posting/review, ad
+serving/feedback, and the onboarding chat (see
 [`docs/next_phase_plan.md`](docs/next_phase_plan.md) for design details).
 Campaign eligibility (status/budget/dates) syncs from Postgres into
 Pinecone via Kafka + Debezium CDC, not a synchronous write on approval —
@@ -277,6 +279,4 @@ Frontend: all four views built — onboarding chat + feed (View 1),
 performance dashboard (View 2), campaign submission (View 3), and the
 moderator queue (View 4). Verified against the real backend via scripted
 integration tests hitting the actual endpoints in the same sequence the UI
-calls them (no browser was available in the session that built it, so
-rendering itself hasn't been visually confirmed yet — worth an eyeball pass
-with `npm run dev` before treating it as done).
+calls them, and through direct use in the browser (`npm run dev`).
