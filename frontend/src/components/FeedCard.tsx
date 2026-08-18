@@ -77,7 +77,7 @@ export function FeedCard({
   if (reported) {
     return (
       <div ref={cardRef} className="rounded border border-stone-200 p-4 text-sm text-stone-500 dark:border-stone-700 dark:text-stone-500">
-        Thanks — this ad has been reported and won't be emphasized here.
+        Thanks. This ad has been reported and won't be emphasized here.
       </div>
     )
   }

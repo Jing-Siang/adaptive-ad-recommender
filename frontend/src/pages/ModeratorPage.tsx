@@ -71,7 +71,7 @@ export function ModeratorPage() {
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {campaigns.length === 0 ? (
-        <p className="text-sm text-stone-600 dark:text-stone-400">Queue is empty — nothing needs review.</p>
+        <p className="text-sm text-stone-600 dark:text-stone-400">Queue is empty. Nothing needs review.</p>
       ) : (
         <ul className="space-y-4">
           {campaigns.map((c) => (
