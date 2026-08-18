@@ -3,7 +3,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Event
+from app.models import Campaign, Event
 from app.serving.performance_api import _rate
 from tests.conftest import auth_header
 
@@ -84,7 +84,7 @@ def test_get_performance_trend_buckets_by_day(db, campaign, advertiser_user):
         db.commit()
 
 
-def test_get_performance_per_campaign_breakdown(db, campaign, advertiser_user):
+def test_get_performance_campaigns_per_campaign_breakdown(db, campaign, advertiser_user):
     """A campaign's row in the breakdown table has exactly the counts and
     CTR its own events produce, independent of any other campaign's data."""
     headers = auth_header(advertiser_user)
@@ -100,8 +100,8 @@ def test_get_performance_per_campaign_breakdown(db, campaign, advertiser_user):
     db.commit()
 
     try:
-        campaigns = client.get("/performance", headers=headers).json()["campaigns"]
-        row = next(c for c in campaigns if c["campaign_id"] == campaign.id)
+        resp = client.get("/performance/campaigns", params={"search": campaign.headline}, headers=headers)
+        row = next(c for c in resp.json()["items"] if c["campaign_id"] == campaign.id)
 
         assert row["headline"] == campaign.headline
         assert row["status"] == campaign.status
@@ -116,18 +116,85 @@ def test_get_performance_per_campaign_breakdown(db, campaign, advertiser_user):
         db.commit()
 
 
-def test_get_performance_includes_campaigns_with_zero_events(campaign, advertiser_user):
+def test_get_performance_campaigns_includes_campaigns_with_zero_events(campaign, advertiser_user):
     """A campaign with no events at all still appears, with all-zero counts,
-    rather than being silently omitted from the breakdown table."""
-    campaigns = client.get("/performance", headers=auth_header(advertiser_user)).json()["campaigns"]
-    row = next(c for c in campaigns if c["campaign_id"] == campaign.id)
+    rather than being silently omitted from the breakdown table (LEFT JOIN,
+    not INNER)."""
+    resp = client.get("/performance/campaigns", params={"search": campaign.headline}, headers=auth_header(advertiser_user))
+    row = next(c for c in resp.json()["items"] if c["campaign_id"] == campaign.id)
 
     assert row["impressions"] == 0
     assert row["ctr"] == 0.0
+
+
+def test_get_performance_campaigns_filters_by_status(db, campaign, advertiser_user):
+    campaign.status = "rejected"
+    db.commit()
+
+    headers = auth_header(advertiser_user)
+    resp = client.get("/performance/campaigns", params={"status": "rejected", "search": campaign.headline}, headers=headers)
+    assert campaign.id in [c["campaign_id"] for c in resp.json()["items"]]
+
+    resp_other = client.get("/performance/campaigns", params={"status": "active", "search": campaign.headline}, headers=headers)
+    assert campaign.id not in [c["campaign_id"] for c in resp_other.json()["items"]]
+
+
+def test_get_performance_campaigns_sorts_by_spend(db, advertiser_user):
+    def _campaign(headline: str, budget_spent: float) -> Campaign:
+        c = Campaign(
+            user_id=advertiser_user.id,
+            headline=headline,
+            description="pytest sort description",
+            category="hardware",
+            objective="conversions",
+            budget_total=100.0,
+            budget_spent=budget_spent,
+            start_date=date(2020, 1, 1),
+            end_date=date(2099, 1, 1),
+            excluded_categories=[],
+            status="active",
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        return c
+
+    low = _campaign("Zzz Perf Sort Low Spend", 5.0)
+    high = _campaign("Aaa Perf Sort High Spend", 50.0)
+    try:
+        resp = client.get(
+            "/performance/campaigns",
+            params={"search": "Perf Sort", "sort_by": "spend", "sort_dir": "desc"},
+            headers=auth_header(advertiser_user),
+        )
+        ids = [c["campaign_id"] for c in resp.json()["items"]]
+        assert ids.index(high.id) < ids.index(low.id)
+    finally:
+        db.delete(low)
+        db.delete(high)
+        db.commit()
+
+
+def test_get_performance_campaigns_paginates(db, campaign, advertiser_user):
+    resp = client.get(
+        "/performance/campaigns", params={"page": 1, "page_size": 1}, headers=auth_header(advertiser_user)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page"] == 1
+    assert body["page_size"] == 1
+    assert len(body["items"]) == 1
+    assert body["total"] >= 1
+    assert body["total_pages"] >= 1
 
 
 def test_get_performance_rejects_end_user_role(user):
     """The point of gating this endpoint at all -- an end_user (the
     default role) is not part of the advertiser/moderator audience."""
     resp = client.get("/performance", headers=auth_header(user))
+    assert resp.status_code == 403
+
+
+def test_get_performance_campaigns_rejects_end_user_role(user):
+    resp = client.get("/performance/campaigns", headers=auth_header(user))
     assert resp.status_code == 403

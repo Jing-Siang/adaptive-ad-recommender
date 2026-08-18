@@ -99,7 +99,14 @@ export interface CampaignPerformance {
 export interface PerformanceResponse {
   totals: PerformanceTotals
   trend: PerformanceTrendPoint[]
-  campaigns: CampaignPerformance[]
+}
+
+export interface CampaignPerformanceListResponse {
+  items: CampaignPerformance[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
 }
 
 // --------------------------------------------------------------------------

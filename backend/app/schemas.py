@@ -317,11 +317,24 @@ class CampaignPerformance(BaseModel):
 
 
 class PerformanceResponse(BaseModel):
-    """Response body for GET /performance."""
+    """Response body for GET /performance. The per-campaign breakdown lives
+    in its own paginated endpoint (GET /performance/campaigns) instead of
+    being bundled in here -- same reasoning as GET /campaigns's
+    CampaignListResponse, the catalog is thousands of rows."""
 
     totals: PerformanceTotals
     trend: list[PerformanceTrendPoint]
-    campaigns: list[CampaignPerformance]
+
+
+class CampaignPerformanceListResponse(BaseModel):
+    """Response for GET /performance/campaigns -- paginated per-campaign
+    performance breakdown, mirroring CampaignListResponse's shape."""
+
+    items: list[CampaignPerformance]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 # --------------------------------------------------------------------------

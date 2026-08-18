@@ -3,6 +3,7 @@ import type {
   BatchRecommendationResponse,
   CampaignCreateRequest,
   CampaignListResponse,
+  CampaignPerformanceListResponse,
   CampaignResponse,
   ChatMessage,
   ModerationRequest,
@@ -229,6 +230,29 @@ export async function streamOnboardingChat(
 
 export function fetchPerformance(): Promise<PerformanceResponse> {
   return request('/performance')
+}
+
+export interface ListPerformanceCampaignsParams {
+  status?: string
+  search?: string
+  sortBy?: 'headline' | 'impressions' | 'likes' | 'dislikes' | 'conversions' | 'reports' | 'ctr' | 'spend'
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  pageSize?: number
+}
+
+export function fetchPerformanceCampaigns(
+  params: ListPerformanceCampaignsParams = {},
+): Promise<CampaignPerformanceListResponse> {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  if (params.search) query.set('search', params.search)
+  if (params.sortBy) query.set('sort_by', params.sortBy)
+  if (params.sortDir) query.set('sort_dir', params.sortDir)
+  if (params.page) query.set('page', String(params.page))
+  if (params.pageSize) query.set('page_size', String(params.pageSize))
+  const qs = query.toString()
+  return request(`/performance/campaigns${qs ? `?${qs}` : ''}`)
 }
 
 // --------------------------------------------------------------------------
