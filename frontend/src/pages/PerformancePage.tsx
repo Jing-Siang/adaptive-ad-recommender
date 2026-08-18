@@ -20,9 +20,17 @@ function formatUsd(n: number): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', notation: 'compact' }).format(n)
 }
 
+type Tab = 'overview' | 'campaigns'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'campaigns', label: 'Campaigns' },
+]
+
 export function PerformancePage() {
   const [data, setData] = useState<PerformanceResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('overview')
 
   useEffect(() => {
     fetchPerformance()
@@ -59,22 +67,40 @@ export function PerformancePage() {
         </Tooltip>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatTile label="Impressions" value={formatCompact(totals.impressions)} />
-        <StatTile label="CTR" value={formatPct(totals.ctr)} />
-        <StatTile label="Engagement rate" value={formatPct(totals.engagement_rate)} />
-        <StatTile label="Dislike rate" value={formatPct(totals.dislike_rate)} />
-        <StatTile label="Total spend" value={formatUsd(totals.total_spend)} />
-        <StatTile label="Avg. CPA" value={totals.avg_cpa === null ? '—' : formatUsd(totals.avg_cpa)} />
+      <div className="flex gap-1 border-b border-stone-200 dark:border-stone-700">
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+              tab === id
+                ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100'
+                : 'border-transparent text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="rounded border border-stone-200 p-4 dark:border-stone-700">
-        <CtrTrendChart data={trend} />
-      </div>
+      {tab === 'overview' ? (
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatTile label="Impressions" value={formatCompact(totals.impressions)} />
+            <StatTile label="CTR" value={formatPct(totals.ctr)} />
+            <StatTile label="Engagement rate" value={formatPct(totals.engagement_rate)} />
+            <StatTile label="Dislike rate" value={formatPct(totals.dislike_rate)} />
+            <StatTile label="Total spend" value={formatUsd(totals.total_spend)} />
+            <StatTile label="Avg. CPA" value={totals.avg_cpa === null ? '—' : formatUsd(totals.avg_cpa)} />
+          </div>
 
-      <div>
-        <h2 className="text-lg font-semibold">Per-campaign breakdown</h2>
-        <div className="mt-2 overflow-x-auto">
+          <div className="rounded border border-stone-200 p-4 dark:border-stone-700">
+            <CtrTrendChart data={trend} />
+          </div>
+        </>
+      ) : (
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400">
@@ -118,7 +144,7 @@ export function PerformancePage() {
             </tbody>
           </table>
         </div>
-      </div>
+      )}
     </div>
   )
 }
