@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchRecommendationBatch } from '../api'
+import { ApiError, fetchRecommendationBatch } from '../api'
 import type { FeedItem } from '../types'
 import { FeedCard } from './FeedCard'
 import { Spinner } from './Spinner'
@@ -31,7 +31,7 @@ export function Feed() {
     } catch (err) {
       // A 404 here means retrieve_candidates ran dry (nothing eligible left) --
       // not a real error, just "nothing more to show right now."
-      if (err instanceof Error && err.message.includes('404')) {
+      if (err instanceof ApiError && err.status === 404) {
         setExhausted(true)
       } else {
         setError(err instanceof Error ? err.message : String(err))

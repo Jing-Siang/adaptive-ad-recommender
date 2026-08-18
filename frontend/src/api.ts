@@ -63,6 +63,18 @@ export async function refreshAccessToken(): Promise<AuthTokenResponse | null> {
   return body
 }
 
+// Thrown by request() on a non-2xx response -- carries the numeric status
+// separately from the message, so callers that need to branch on it (e.g.
+// Feed.tsx treating a 404 as "nothing left to show" rather than a real
+// error) check err.status instead of substring-matching the message text.
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit, _isRetry = false): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
@@ -81,8 +93,20 @@ async function request<T>(path: string, init?: RequestInit, _isRetry = false): P
   }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${response.status} ${body}`)
+    const text = await response.text().catch(() => '')
+    // FastAPI's error body is {"detail": "..."} -- surface that human-
+    // readable message directly instead of dumping the raw JSON blob in
+    // front of the user (e.g. the rate limiter's "Too many campaigns
+    // submitted recently -- try again later." instead of
+    // `POST /campaigns failed: 429 {"detail":"Too many campaigns..."}`).
+    let detail = text
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed?.detail === 'string') detail = parsed.detail
+    } catch {
+      // Not JSON (e.g. a proxy/gateway error page) -- fall back to raw text.
+    }
+    throw new ApiError(response.status, detail || `${init?.method ?? 'GET'} ${path} failed: ${response.status}`)
   }
   if (response.status === 204) {
     return undefined as T
