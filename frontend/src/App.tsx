@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { MessageSquare, BarChart3, Megaphone, ShieldCheck, LogOut } from 'lucide-react'
 import SimpleBar from 'simplebar-react'
 import 'simplebar-react/dist/simplebar.min.css'
@@ -39,6 +39,8 @@ function RequireRole({ roles, children }: { roles: Role[]; children: React.React
 
 function App() {
   const { user, loading, logout } = useAuth()
+  const location = useLocation()
+  const onFeedRoute = location.pathname === '/'
 
   if (loading) {
     return (
@@ -95,36 +97,47 @@ function App() {
       </aside>
       <main className="min-h-0 flex-1">
         <SimpleBar style={{ height: '100%' }}>
-          <Routes>
-            <Route path="/" element={<OnboardingFeedPage />} />
-            <Route
-              path="/performance"
-              element={
-                <RequireRole roles={['advertiser', 'moderator']}>
-                  <PerformancePage />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/campaigns"
-              element={
-                <RequireRole roles={['advertiser', 'moderator']}>
-                  <CampaignsPage />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/moderator"
-              element={
-                <RequireRole roles={['moderator']}>
-                  <ModeratorPage />
-                </RequireRole>
-              }
-            />
-            {/* Any unmatched URL -- typos, stale links, made-up paths --
-                lands back on the feed instead of a blank page. */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          {/* Always mounted, never torn down by route changes -- otherwise
+              navigating to another page and back would unmount
+              OnboardingChat and lose the in-progress conversation (its
+              state is plain component state, not persisted anywhere on
+              purpose, see docs/auth_plan.md). Hidden via CSS instead of
+              being routed, so it keeps its state across every other page
+              visit; only a real page reload loses it. */}
+          <div className={onFeedRoute ? undefined : 'hidden'}>
+            <OnboardingFeedPage />
+          </div>
+          {!onFeedRoute && (
+            <Routes>
+              <Route
+                path="/performance"
+                element={
+                  <RequireRole roles={['advertiser', 'moderator']}>
+                    <PerformancePage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/campaigns"
+                element={
+                  <RequireRole roles={['advertiser', 'moderator']}>
+                    <CampaignsPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/moderator"
+                element={
+                  <RequireRole roles={['moderator']}>
+                    <ModeratorPage />
+                  </RequireRole>
+                }
+              />
+              {/* Any unmatched URL -- typos, stale links, made-up paths --
+                  lands back on the feed instead of a blank page. */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          )}
         </SimpleBar>
       </main>
     </div>
