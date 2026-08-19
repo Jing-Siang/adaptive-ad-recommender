@@ -1,11 +1,32 @@
+import itertools
+import json
 from datetime import date
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.campaigns.policy_review import _lookup_advertiser_history, review_campaign
+from app.campaigns.policy_review import _call_reviewer, _lookup_advertiser_history, review_campaign
 from app.models import Campaign
 from app.schemas import ReviewDecision
+
+
+def _fake_function_call(name: str, call_id: str) -> SimpleNamespace:
+    return SimpleNamespace(type="function_call", name=name, arguments="{}", call_id=call_id)
+
+
+def _fake_response(output_parsed=None, output=None) -> SimpleNamespace:
+    return SimpleNamespace(output_parsed=output_parsed, output=output or [])
+
+
+def _mock_client(side_effect) -> MagicMock:
+    """A fake AsyncOpenAI client whose responses.parse() yields from
+    `side_effect` (a list, or an infinite itertools.repeat for the
+    max-turns test) -- lets _call_reviewer's own loop logic be exercised
+    deterministically without a real API call."""
+    client = MagicMock()
+    client.responses.parse = AsyncMock(side_effect=side_effect)
+    return client
 
 
 @pytest.mark.asyncio
@@ -161,3 +182,110 @@ def test_lookup_advertiser_history_excludes_the_campaign_under_review(db, advert
     must not count as part of its own advertiser's history."""
     history = _lookup_advertiser_history(db, advertiser_user.id, exclude_campaign_id=campaign.id)
     assert history["total_past_campaigns"] == 0
+
+
+# --------------------------------------------------------------------------
+# _call_reviewer's own tool-calling loop -- mocked at the OpenAI client
+# boundary so the loop's control flow (dispatch, feeding results back,
+# terminating, the max-turns safety cap) is covered deterministically and
+# cheaply, rather than only incidentally by the real-API adversarial tests.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("app.campaigns.policy_review._get_client")
+async def test_call_reviewer_returns_immediately_when_no_tool_call(mock_get_client):
+    decision = ReviewDecision(outcome="approved", reason="clean, ordinary ad", excluded_categories=[])
+    mock_get_client.return_value = _mock_client([_fake_response(output_parsed=decision)])
+
+    result = await _call_reviewer("policy text", "campaign text", user_id=1, campaign_id=1)
+
+    assert result is decision
+    assert mock_get_client.return_value.responses.parse.call_count == 1
+
+
+@pytest.mark.asyncio
+@patch("app.campaigns.policy_review._lookup_advertiser_history")
+@patch("app.campaigns.policy_review._get_client")
+async def test_call_reviewer_executes_tool_and_feeds_result_back(mock_get_client, mock_lookup):
+    lookup_result = {
+        "total_past_campaigns": 2,
+        "by_status": {"rejected": 2},
+        "recent_rejection_reasons": ["unsubstantiated claim"],
+    }
+    mock_lookup.return_value = lookup_result
+    decision = ReviewDecision(outcome="needs_review", reason="borderline, history is mixed", excluded_categories=[])
+    call = _fake_function_call("lookup_advertiser_history", "call_abc")
+    mock_get_client.return_value = _mock_client(
+        [
+            _fake_response(output_parsed=None, output=[call]),
+            _fake_response(output_parsed=decision, output=[]),
+        ]
+    )
+
+    result = await _call_reviewer("policy text", "campaign text", user_id=42, campaign_id=99)
+
+    assert result is decision
+    parse_mock = mock_get_client.return_value.responses.parse
+    assert parse_mock.call_count == 2
+
+    # user_id/exclude_campaign_id are passed through exactly, never taken
+    # from anything the model supplied (the tool's own schema takes no
+    # arguments -- call.arguments is never even read).
+    (_db, called_user_id, called_exclude_id), _kwargs = mock_lookup.call_args
+    assert called_user_id == 42
+    assert called_exclude_id == 99
+
+    second_call_input = parse_mock.call_args_list[1].kwargs["input"]
+    function_outputs = [item for item in second_call_input if isinstance(item, dict) and item.get("type") == "function_call_output"]
+    assert len(function_outputs) == 1
+    assert function_outputs[0]["call_id"] == "call_abc"
+    assert json.loads(function_outputs[0]["output"]) == lookup_result
+
+
+@pytest.mark.asyncio
+@patch("app.campaigns.policy_review._get_client")
+async def test_call_reviewer_handles_unknown_tool_name_gracefully(mock_get_client):
+    """A tool name the model hallucinates (or a future/renamed tool this
+    code doesn't know about yet) must not crash the loop -- it gets a
+    plain error result fed back, same as any other tool output, and the
+    loop keeps going."""
+    decision = ReviewDecision(outcome="approved", reason="clean", excluded_categories=[])
+    call = _fake_function_call("some_tool_that_does_not_exist", "call_xyz")
+    mock_get_client.return_value = _mock_client(
+        [
+            _fake_response(output_parsed=None, output=[call]),
+            _fake_response(output_parsed=decision, output=[]),
+        ]
+    )
+
+    result = await _call_reviewer("policy text", "campaign text", user_id=1, campaign_id=1)
+
+    assert result is decision
+    second_call_input = mock_get_client.return_value.responses.parse.call_args_list[1].kwargs["input"]
+    function_outputs = [item for item in second_call_input if isinstance(item, dict) and item.get("type") == "function_call_output"]
+    assert json.loads(function_outputs[0]["output"]) == {"error": "unknown tool 'some_tool_that_does_not_exist'"}
+
+
+@pytest.mark.asyncio
+@patch("asyncio.sleep", new_callable=AsyncMock)  # skip tenacity's real retry backoff
+@patch("app.campaigns.policy_review._lookup_advertiser_history", return_value={})
+@patch("app.campaigns.policy_review._get_client")
+async def test_call_reviewer_gives_up_after_max_tool_turns(mock_get_client, mock_lookup, mock_sleep):
+    """If the model just keeps calling tools and never returns a final
+    decision, the loop must not run forever -- it has to give up with a
+    clear error rather than hang the background review job indefinitely."""
+    call = _fake_function_call("lookup_advertiser_history", "call_loop")
+    always_calling = itertools.repeat(_fake_response(output_parsed=None, output=[call]))
+    mock_get_client.return_value = _mock_client(always_calling)
+
+    with pytest.raises(RuntimeError, match="did not return a final decision"):
+        await _call_reviewer("policy text", "campaign text", user_id=1, campaign_id=1)
+
+    # _call_reviewer is itself wrapped in @retry(stop_after_attempt(4)), so
+    # the whole loop (4 tool-turns each) reruns up to 4 times before the
+    # RuntimeError is finally allowed through -- assert the loop's own cap
+    # held on every attempt rather than pinning an exact total.
+    call_count = mock_get_client.return_value.responses.parse.call_count
+    assert call_count % 4 == 0
+    assert call_count >= 4
