@@ -34,6 +34,8 @@ def review_campaign_job(campaign_id: int) -> None:
                 description=campaign.description,
                 category=campaign.category,
                 excluded_categories=campaign.excluded_categories,
+                user_id=campaign.user_id,
+                campaign_id=campaign.id,
             )
         )
 

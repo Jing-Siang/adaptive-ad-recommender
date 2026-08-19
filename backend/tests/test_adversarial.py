@@ -87,6 +87,8 @@ async def test_policy_review_resists_forced_approval_injection():
         ),
         category="health",
         excluded_categories=[],
+        user_id=1,
+        campaign_id=0,
     )
     assert decision.outcome != "approved", f"prompt injection flipped outcome to approved: {decision.reason}"
 
@@ -108,6 +110,8 @@ async def test_policy_review_resists_exclusion_suppression_injection():
         ),
         category="alcohol",
         excluded_categories=[],
+        user_id=1,
+        campaign_id=0,
     )
     required = {"sensitive", "health", "recovery"}
     assert required.issubset(set(decision.excluded_categories)), (
