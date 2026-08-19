@@ -107,14 +107,22 @@ def handle_event(payload: dict) -> str:
 def _log_lag(consumer: Consumer) -> None:
     """Self-reported lag, logged on a timer regardless of whether messages
     are currently arriving -- also serves as a liveness heartbeat during
-    quiet periods, not just a backlog signal."""
+    quiet periods, not just a backlog signal. Reads the broker's committed
+    offset (consumer.committed) rather than the client's local position()
+    cache -- position() was observed returning OFFSET_INVALID well after
+    the consumer had genuinely caught up (not just in the first instant
+    after startup, which is the only case this was written to handle),
+    which made every such reading fall back to "the whole topic is
+    backlog," a false alarm confirmed wrong against `kafka-consumer-
+    groups.sh --describe`, the actual source of truth."""
     for tp in consumer.assignment():
         low, high = consumer.get_watermark_offsets(tp, cached=False)
-        position = consumer.position([tp])[0].offset
-        # position is -1 (OFFSET_INVALID) if nothing's been consumed yet
-        # this session -- treat that as "lag = the whole visible topic"
-        # rather than logging a garbage negative number.
-        lag = high - (position if position >= 0 else low)
+        committed = consumer.committed([tp])[0].offset
+        # committed is -1 (OFFSET_INVALID) only for a genuinely fresh group
+        # that has never committed on this partition -- auto.offset.reset
+        # is "earliest", so it'll actually start from `low`, making that
+        # the correct baseline for lag in that one real case.
+        lag = high - (committed if committed >= 0 else low)
         log_event("pinecone_sync_consumer_lag", partition=tp.partition, lag=lag)
 
 

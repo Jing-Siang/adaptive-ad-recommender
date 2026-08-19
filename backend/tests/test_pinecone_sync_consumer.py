@@ -1,8 +1,53 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from app.campaigns.pinecone_sync_consumer import _needs_reembed, handle_event
+from app.campaigns.pinecone_sync_consumer import _log_lag, _needs_reembed, handle_event
 
 _MOD = "app.campaigns.pinecone_sync_consumer"
+
+
+class _FakeTopicPartition:
+    def __init__(self, partition: int, offset: int = 0):
+        self.partition = partition
+        self.offset = offset
+
+
+def _mock_consumer(*, committed_offset: int, low: int, high: int, partition: int = 0) -> MagicMock:
+    consumer = MagicMock()
+    tp = _FakeTopicPartition(partition)
+    consumer.assignment.return_value = [tp]
+    consumer.get_watermark_offsets.return_value = (low, high)
+    consumer.committed.return_value = [_FakeTopicPartition(partition, committed_offset)]
+    return consumer
+
+
+class TestLogLag:
+    """_log_lag must read the broker's committed offset (consumer.committed),
+    not the client's local position() cache -- position() was observed
+    returning OFFSET_INVALID long after the consumer had genuinely caught
+    up, not just in the first instant after startup, which made every such
+    reading falsely report the entire topic as backlog."""
+
+    @patch(f"{_MOD}.log_event")
+    def test_lag_is_zero_when_caught_up(self, mock_log_event):
+        consumer = _mock_consumer(committed_offset=9190, low=0, high=9190)
+        _log_lag(consumer)
+        mock_log_event.assert_called_once_with("pinecone_sync_consumer_lag", partition=0, lag=0)
+
+    @patch(f"{_MOD}.log_event")
+    def test_lag_reflects_real_backlog(self, mock_log_event):
+        consumer = _mock_consumer(committed_offset=9000, low=0, high=9190)
+        _log_lag(consumer)
+        mock_log_event.assert_called_once_with("pinecone_sync_consumer_lag", partition=0, lag=190)
+
+    @patch(f"{_MOD}.log_event")
+    def test_lag_falls_back_to_low_watermark_for_a_fresh_group(self, mock_log_event):
+        """OFFSET_INVALID (-1) from consumer.committed means this group has
+        never committed on this partition -- a genuinely fresh group, which
+        (with auto.offset.reset="earliest") will actually start from `low`,
+        so that's the correct baseline here, not 0."""
+        consumer = _mock_consumer(committed_offset=-1, low=100, high=9190)
+        _log_lag(consumer)
+        mock_log_event.assert_called_once_with("pinecone_sync_consumer_lag", partition=0, lag=9090)
 
 
 def _row(**overrides) -> dict:
