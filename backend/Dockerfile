@@ -6,6 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY mcp_servers ./mcp_servers
 COPY data ./data
 
 EXPOSE 8000

@@ -25,13 +25,15 @@ services:
     ports:
       - "6379:6379"
 
-  # Web GUI for browsing Postgres -- opt-in, see `make pgadmin` (not started
-  # by `make infra`, matching the Kafka services below). servers.json
+  # Web GUI for browsing Postgres -- opt-in via the `tools` profile, so
+  # neither `make infra` nor `make docker-up` starts it; `make pgadmin` does
+  # (naming a profiled service explicitly starts it). servers.json
   # pre-registers the postgres service so it shows up in the sidebar
   # without manually re-entering host/port/db each time; the password
   # still has to be typed on first connect (see `make pgadmin`'s output).
   pgadmin:
     image: dpage/pgadmin4:latest
+    profiles: [tools]
     ports:
       - "5050:80"
     environment:
@@ -44,11 +46,12 @@ services:
     depends_on:
       - postgres
 
-  # --- Kafka + Debezium CDC (opt-in, see `make kafka`) -----------------------
-  # Syncs campaigns table eligibility (status/budget) into Pinecone -- see
-  # docs/kafka_cdc_plan.md for the full design. Not started by `make infra`;
-  # these two services alone pull several hundred MB of JVM images, so people
-  # not touching this feature aren't forced to download them.
+  # --- Kafka + Debezium CDC (see `make kafka`) --------------------------------
+  # Syncs the campaigns table into Pinecone -- see docs/kafka_cdc_plan.md for
+  # the full design. Not started by `make infra` (these two services alone
+  # pull several hundred MB of JVM images), but `make docker-up` does start
+  # them, along with the consumer service below that actually applies the
+  # changes -- without it, approved campaigns never become servable.
 
   kafka:
     image: apache/kafka:4.3.1
@@ -127,6 +130,7 @@ services:
       - REDIS_URL=redis://redis:6379
     volumes:
       - ./backend/app:/app/app
+      - ./backend/mcp_servers:/app/mcp_servers
       - ./backend/data:/app/data
     depends_on:
       - postgres
@@ -141,14 +145,38 @@ services:
       - DATABASE_URL=postgresql+psycopg://ad_recommender:ad_recommender@postgres:5432/ad_recommender
     volumes:
       - ./backend/app:/app/app
+      - ./backend/mcp_servers:/app/mcp_servers
     depends_on:
       - postgres
       - redis
+
+  # Pinecone sync consumer (same as `make kafka-consumer` natively). Like
+  # DATABASE_URL above, .env's KAFKA_BOOTSTRAP_SERVERS (localhost:9094) is
+  # the host-exposed listener -- inside the network it's kafka:9092. The
+  # connector itself still needs `make kafka-register-connector` once per
+  # fresh kafka_data volume.
+  consumer:
+    build: ./backend
+    command: python -m app.campaigns.pinecone_sync_consumer
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://ad_recommender:ad_recommender@postgres:5432/ad_recommender
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - kafka
+      - postgres
 
   frontend:
     build: ./frontend
     ports:
       - "5173:5173"
+    # VITE_GOOGLE_CLIENT_ID lives here; .env itself is kept out of the image
+    # by .dockerignore. Vite exposes VITE_* vars from the process env too.
+    env_file:
+      - ./frontend/.env
     environment:
       - VITE_API_BASE_URL=http://localhost:8000
     volumes:
