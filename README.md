@@ -1,282 +1,192 @@
 # Adaptive Ad Recommender
 
-Two halves: advertisers **post** campaigns, which go through an AI (and
-sometimes human) policy review before they're eligible to serve; the system
-then **serves** the most relevant eligible campaign to a user based on
-their profile/context, and learns from feedback over time — nudging user
-profiles and debiting campaign budgets as it goes.
+A full-stack, LLM-powered ad engine. Advertisers submit campaigns, an AI agent reviews them against a written ad policy, and approved ads are served to users through vector retrieval. Every reaction then reshapes that user's profile and charges the campaign's budget.
 
-See [`docs/spec.md`](docs/spec.md) for the full design.
+It is built like a production system rather than a notebook demo: Postgres as the source of truth, async jobs, change data capture into the vector store, real auth with roles, and tests that probe the LLM surfaces with actual prompt-injection attacks.
 
-## Stack
+**Stack:** Python · FastAPI · PostgreSQL · SQLAlchemy/Alembic · Redis/RQ · Kafka + Debezium · Pinecone · OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) · MCP · React · TypeScript · Vite · Tailwind · Docker Compose
 
-| Layer | Tool |
-|---|---|
-| LLM (reasoning, re-ranking, structured output) | OpenAI API (`gpt-4o-mini`, Responses API) |
-| Embeddings | OpenAI (`text-embedding-3-small`) |
-| Vector store | Pinecone (serverless) |
-| Relational store | Postgres + SQLAlchemy + Alembic |
-| Async job queue | Redis + RQ |
-| Change data capture | Kafka (KRaft) + Debezium — syncs campaign eligibility (status/budget/dates) from Postgres into Pinecone, see [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md) |
-| Agent framework | LangChain + MCP (`langchain-mcp-adapters`) |
-| Backend | FastAPI |
-| Frontend | React + Vite + TypeScript, Tailwind CSS, react-router-dom |
-| Reliability | `tenacity`, Pydantic, atomic SQL budget updates |
-| Testing | `pytest` (95 tests, 1 integration test run separately) |
-| Deployment | Docker Compose locally → Railway/Render for production |
+---
 
-## Repo layout
+## What it does
 
-```
-adaptive-ad-recommender/
-├── backend/
-│   ├── app/
-│   │   ├── core/       # shared infra: config, db, queue, embeddings, vector_store
-│   │   ├── serving/    # users -> retrieve -> rerank -> guardrail -> serve -> events
-│   │   └── campaigns/  # advertiser submits -> policy review -> moderation;
-│   │                   #   pinecone_sync_consumer.py syncs Pinecone via Kafka CDC
-│   ├── mcp_servers/    # ad-policy MCP resource server
-│   ├── alembic/        # DB migrations
-│   ├── data/            # synthetic personas + versioned seed campaign catalog
-│   ├── tests/
-│   └── scripts/         # feedback-round + demo-catalog-seeding demo artifacts
-├── frontend/            # React + Vite + TS + Tailwind
-│   └── src/
-│       ├── pages/        # OnboardingFeedPage, PerformancePage, CampaignsPage, ModeratorPage
-│       ├── components/    # Feed, FeedCard, OnboardingChat, ReactionButtons, CtrTrendChart, …
-│       ├── api.ts         # fetch functions for every backend endpoint
-│       └── types.ts       # TS interfaces mirroring the backend's Pydantic schemas
-├── kafka/
-│   └── connectors/      # Debezium Postgres connector registration JSON
-├── docs/
-│   ├── spec.md
-│   └── kafka_cdc_plan.md   # Postgres -> Pinecone CDC sync design + phase-by-phase log
-└── docker-compose.yml
+| Role | Experience |
+| --- | --- |
+| **End user** | Signs in with Google, describes their interests in a short chat, then scrolls an infinite feed of ads. Like / interested / dislike reactions move their profile vector, so the feed adapts in real time. They can hide ads, report them, or reset their profile. |
+| **Advertiser** | Submits campaigns (headline, copy, category, budget, date window) and watches them move through review. A performance dashboard shows impressions, reactions, CTR trends and budget spend, with a searchable, sortable, paginated table across 3,000+ campaigns. |
+| **Moderator** | Works a queue of campaigns the AI reviewer escalated, sees the agent's reasoning and research notes, and approves or rejects. |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    FE["React frontend<br/>feed · onboarding · dashboard · moderation"]
+    API["FastAPI<br/>JWT auth + roles"]
+    PG[("Postgres<br/>source of truth")]
+    RQ["Redis + RQ worker<br/>policy review agent"]
+    MCP["MCP server<br/>ad-policy document"]
+    DBZ["Debezium<br/>(Postgres WAL)"]
+    K[["Kafka<br/>campaigns topic + DLQ"]]
+    C["Sync consumer"]
+    PC[("Pinecone<br/>ads + user profiles")]
+    OAI["OpenAI<br/>LLM + embeddings"]
+
+    FE --> API
+    API --> PG
+    API -- enqueue review --> RQ
+    RQ -- fetch policy --> MCP
+    RQ -- decision --> PG
+    PG --> DBZ --> K --> C --> PC
+    API -- retrieve / nudge profile --> PC
+    RQ -.-> OAI
+    C -.-> OAI
+    API -.-> OAI
 ```
 
-## Local development
+There are three main flows.
 
-Common commands are wrapped in a `Makefile` — run `make help` for the full
-list. `make` is Linux/macOS-native; on Windows, run it from WSL rather than
-cmd.exe/PowerShell (the stack already assumes Docker + a Python venv +
-bash-style commands, so WSL is the natural fit there too). Each step below
-shows the `make` target alongside the raw command, for whichever you prefer.
+**1. Campaign review (async, agentic).** `POST /campaigns` stores the row as `pending_review` and returns immediately. An RQ worker runs the policy reviewer:
 
-### 1. Start Postgres + Redis
+- It fetches the current ad policy from an **MCP resource server**.
+- It runs a bounded **tool-calling loop** with `gpt-4o-mini`, using OpenAI's hosted web search to verify factual claims plus a custom `lookup_advertiser_history` tool.
+- It returns a schema-validated decision: `approved`, `rejected`, or `needs_review` for a human moderator.
+
+**2. Postgres to Pinecone sync (CDC).** Nothing writes campaigns to the vector store directly. Debezium streams every change on the `campaigns` table into a compacted Kafka topic. A consumer then applies each change idempotently:
+
+- It **re-embeds** only when a campaign becomes active or its creative changes.
+- It only **patches metadata** for status or date changes.
+- It **deletes** the vector when the row is deleted.
+- Unprocessable events go to a dead-letter topic.
+
+**3. Serving and learning.** `POST /recommend/batch` takes the user's profile vector and queries Pinecone. It then re-checks every candidate against Postgres (still active, budget left, inside the date window, not blocklisted, not shown in the last hour) and applies brand-safety guardrails. Reactions nudge the profile vector (`+0.15` like, `+0.30` interested, `−0.20` dislike) and debit the campaign's budget with an atomic SQL update.
+
+## Engineering highlights
+
+- **Prompt-injection testing against the real model.** There is a separate adversarial suite that attacks the policy reviewer and the onboarding judge with real, unmocked OpenAI calls. It found actual vulnerabilities:
+  - Adding an "instructions vs. data" framing to the reviewer's prompt fixed its exposure (5/5 clean runs afterward).
+  - Prompt hardening did *not* fix the judge (7/7 runs still failed). So the guarantee moved into code: a deterministic guard ensures a poisoned summary can never be persisted as a profile vector. → [docs/adversarial_testing_plan.md](docs/adversarial_testing_plan.md)
+- **Postgres stays the source of truth, Pinecone is derived.** Eligibility is always re-checked in Postgres at serve time, so lag in the vector store can never serve a paused or over-budget ad. The CDC design was load-tested with 300 campaigns through their full lifecycle (about 1,200 Kafka events): **zero processing errors and zero drift** between the two stores. p50 latency was 0.36s for a metadata patch and 0.93s for a re-embed. → [docs/kafka_cdc_plan.md](docs/kafka_cdc_plan.md)
+- **Decisions backed by measurement.** LLM re-ranking is built (`serving/ranking.py`) but switched off in the feed. Measured, it added about 10s per batch and didn't reliably score every candidate, which wasn't worth it over similarity order. The reasoning is in the code.
+- **Agent guardrails in code, not just prompts.**
+  - The reviewer's tool loop is capped at 4 turns.
+  - Tool arguments that matter, such as which advertiser's history to read, come from the server, never from the model.
+  - Structured output is validated with Pydantic.
+  - Transient failures are retried with `tenacity`.
+- **Real auth.** Google OAuth issues the project's own JWT access and refresh tokens, with `end_user` / `advertiser` / `moderator` role gating. `user_id` always comes from the token and is never trusted from the request body. → [docs/auth_plan.md](docs/auth_plan.md)
+- **Operational details.**
+  - The sync consumer logs its lag as a heartbeat read from the broker's committed offset.
+  - Profile updates are locked per user.
+  - Campaign creation is rate limited (10/hour per account).
+  - Recommendation and review decisions are logged as structured JSON.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| API | FastAPI, Pydantic |
+| Data | PostgreSQL 16, SQLAlchemy 2, Alembic |
+| Async jobs | Redis + RQ |
+| Streaming / CDC | Kafka 4 (KRaft, no ZooKeeper) + Debezium 3 |
+| Vector search | Pinecone (serverless, cosine, 1536-d) |
+| LLM | OpenAI Responses API, `gpt-4o-mini`, `text-embedding-3-small` |
+| Agent tooling | MCP (`langchain-mcp-adapters`), native OpenAI function calling, hosted web search |
+| Auth | Google Identity Services, PyJWT |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, React Router |
+| Testing | pytest: 135 default tests, plus 1 Kafka integration test and 7 adversarial LLM tests |
+| Dev environment | Docker Compose, Makefile |
+
+## Running locally
+
+### Prerequisites
+
+- Docker, Python 3.12, Node 24
+- An **OpenAI** API key
+- A **Pinecone** index: 1536 dimensions, cosine metric
+- A **Google OAuth client ID** (Web application, with `http://localhost:5173` as an authorized origin)
+
+### 1. Configure
 
 ```bash
-make infra
-# equivalent to: docker compose up -d postgres redis
+make install                                   # backend venv + frontend npm install
+cp backend/.env.example backend/.env           # OPENAI_API_KEY, PINECONE_*, GOOGLE_CLIENT_ID, JWT_SECRET
+cp frontend/.env.example frontend/.env         # VITE_API_BASE_URL, VITE_GOOGLE_CLIENT_ID
 ```
 
-### 2. Backend setup
+### 2. Start the infrastructure, then migrate and seed
 
 ```bash
-make install-backend
-# equivalent to: cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+make infra                      # Postgres + Redis
+make kafka                      # Kafka + Debezium Connect
+make kafka-register-connector   # wait until `curl localhost:8083/connectors` responds first; safe to re-run
+make migrate                    # Alembic migrations
+make seed                       # optional: ~3,300 demo campaigns
 ```
+
+### 3. Run the app
+
+Pick **one** of the two options. Both use the same Postgres, Redis and Kafka containers and the same data, so you can switch between them freely. Just don't run both at once, or they'll fight over ports 8000 and 5173.
+
+**Option A: native processes (best for development).** Run each in its own terminal:
 
 ```bash
-cd backend && cp .env.example .env   # fill in OPENAI_API_KEY, PINECONE_API_KEY
+make backend          # API         → http://localhost:8000  (OpenAPI docs at /docs)
+make worker           # campaign review worker
+make kafka-consumer   # Pinecone sync consumer
+make frontend         # web app     → http://localhost:5173
 ```
 
-The Pinecone index itself isn't created automatically — create one (1536
-dimensions, cosine metric, matching `text-embedding-3-small`) via the
-Pinecone console or SDK before running anything that embeds/retrieves.
+**Option B: everything in Docker.**
 
 ```bash
-make migrate
-# equivalent to: cd backend && source .venv/bin/activate && alembic upgrade head
+make docker-up        # postgres, redis, kafka, connect, backend, worker, consumer, frontend
 ```
 
-Creates the schema (advertisers, campaigns, events, reactions).
+Migrations, seeding and connector registration (step 2) still run from the host.
 
-### 3. Run the backend + worker (two processes)
+> **Note:** a campaign only becomes servable once the sync consumer has processed its approval. If the consumer was stopped for a while, it replays the backlog when it restarts. Check progress with `docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:9092 --describe --group pinecone-campaign-sync`.
+
+### Optional tools
 
 ```bash
-# terminal 1
-make backend
-# equivalent to: cd backend && source .venv/bin/activate && uvicorn app.main:app --reload
-
-# terminal 2
-make worker
-# equivalent to: cd backend && source .venv/bin/activate && rq worker --url redis://localhost:6379 campaign_review
+make pgadmin          # Postgres web GUI → http://localhost:5050 (admin@example.com / admin)
+make help             # every available command
 ```
 
-The API runs at `http://localhost:8000` (interactive docs at `/docs`). The
-worker is required — campaign review is async; without it, submitted
-campaigns sit at `status=pending_review` forever.
-
-### 4. Start Kafka + the Pinecone sync consumer (opt-in, but needed for approvals to actually serve)
+## Tests
 
 ```bash
-make kafka                     # equivalent to: docker compose up -d kafka connect
-make kafka-register-connector  # creates the compacted + DLQ topics, registers the Debezium connector (safe to re-run)
-
-# terminal 3
-make kafka-consumer
-# equivalent to: cd backend && source .venv/bin/activate && python -m app.campaigns.pinecone_sync_consumer
+make test               # 135 tests, real Postgres, OpenAI/Pinecone/MCP mocked at their boundaries
+make test-integration   # end-to-end Kafka CDC test (needs the Kafka stack + a small real OpenAI call)
+make test-adversarial   # real prompt-injection attacks against the live model (costs real API money)
 ```
 
-A campaign approval no longer indexes into Pinecone synchronously — it's
-picked up via Postgres change data capture (Debezium → Kafka) and applied
-by this consumer, usually within a couple of seconds. **Skip this step and
-an approved campaign will just never show up in recommendations, with
-nothing telling you why.** See [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md)
-for the full design.
+DB-backed tests run against real Postgres, not SQLite, so constraints, atomic updates and indexes behave the same as in production.
 
-### 5. Try it
+## Project layout
 
-Every endpoint below requires a bearer token (see `docs/auth_plan.md` --
-Google OAuth + JWT, no `user_id` request fields anywhere, it comes from
-the token). The real login path is the frontend's Google Sign-In button;
-for curl testing, mint a local token directly instead of going through a
-real Google account:
-
-```bash
-cd backend && source .venv/bin/activate && python3 -c "
-from app.core.db import SessionLocal
-from app.core.auth import create_access_token
-from app.models import User
-
-db = SessionLocal()
-user = db.query(User).filter_by(google_sub='demo-sub').first()
-if user is None:
-    user = User(google_sub='demo-sub', email='demo@example.com', display_name='Demo User', role='moderator')
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-print(create_access_token(user))
-"
-# copy the printed token
-export TOKEN='<paste it here>'
+```text
+backend/
+  app/
+    core/          config, db, auth, queue, embeddings, vector store, rate limiting
+    campaigns/     submission API, policy review agent, RQ jobs, Kafka→Pinecone consumer
+    serving/       recommend, retrieval, guardrails, feedback, onboarding chat, events, performance
+  mcp_servers/     ad-policy MCP resource server
+  alembic/         migrations
+  scripts/         seed-catalog generation, feedback simulation
+  tests/
+frontend/src/
+  pages/           Login, Onboarding + Feed, Campaigns, Performance, Moderator
+  components/      Feed, FeedCard, OnboardingChat, CtrTrendChart, ReportModal, …
+kafka/connectors/  Debezium connector config
+docs/              design docs and decision logs
 ```
 
-`moderator` is a superset role (see the role model above), so this one
-token covers every example below.
+## Design docs
 
-```bash
-# submit a campaign -- owned by whichever account $TOKEN belongs to, no
-# separate advertiser field
-curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "headline": "24/7 Emergency Plumbing",
-  "description": "Licensed plumbers near you. Free estimates.",
-  "category": "home_repair",
-  "objective": "conversions",
-  "budget_total": 100.0,
-  "start_date": "2026-01-01",
-  "end_date": "2026-12-31"
-}'
-# -> status=pending_review; the worker picks it up and reviews it within a few seconds
+The `docs/` folder records each major decision: what was measured, what went wrong along the way, and why things ended up the way they are.
 
-# once the campaign's approved AND kafka-consumer has processed it (poll
-# GET /campaigns?status=active, then check the consumer's own logs or just
-# wait a couple seconds), the profile vector gets seeded the first time
-# /onboarding/checkpoint decides to show candidates -- see
-# app/serving/onboarding_api.py. Simplest way to get a recommendation
-# without going through the full chat flow is to seed one directly:
-curl -X POST localhost:8000/onboarding/checkpoint -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "messages": [{"role": "user", "content": "need a plumber for a leaky faucet"}]
-}'
-
-# feed-facing recommend: one call returns a ranked, guardrail-allowed batch
-curl -X POST localhost:8000/recommend/batch -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "batch_size": 10
-}'
-
-# log an impression once a served ad actually scrolls into view
-curl -X POST localhost:8000/events/impression -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "ad_id": "<served ad_id from above>"
-}'
-
-# react to the served ad -- like/dislike/interested; nudges the profile and
-# (for like/interested) debits the campaign's budget
-curl -X POST localhost:8000/events/reaction -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "ad_id": "<served ad_id from above>",
-  "reaction": "like"
-}'
-```
-
-If a campaign comes back `needs_review` instead of `active`/`rejected`,
-resolve it as a moderator:
-
-```bash
-curl -X POST localhost:8000/campaigns/<id>/moderate -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{
-  "outcome": "approved",
-  "reason": "complies with policy",
-  "reviewed_by": "your-name"
-}'
-```
-
-### Tests
-
-```bash
-make test
-# equivalent to: cd backend && source .venv/bin/activate && pytest -m "not integration"
-```
-
-Runs against the real dev Postgres (not SQLite — see `docs/spec.md` on why)
-and mocks OpenAI/Pinecone/MCP at their boundaries; needs `make infra` running
-first.
-
-One test is excluded from `make test`: a real, unmocked end-to-end test of
-the Kafka CDC sync (needs `make kafka` + `make kafka-register-connector`
-running, and costs a tiny real OpenAI call). Run it explicitly:
-
-```bash
-make test-integration
-```
-
-### Frontend
-
-```bash
-cd frontend && cp .env.example .env
-make install-frontend   # equivalent to: cd frontend && npm install
-make frontend            # equivalent to: cd frontend && npm run dev
-```
-
-Runs at `http://localhost:5173`. For the onboarding chat / feed views to have
-real candidates to draw from, seed the demo catalog first:
-
-```bash
-make seed
-# equivalent to: cd backend && source .venv/bin/activate &&
-#   python -m scripts.generate_seed_campaign_data && python -m scripts.seed_demo_campaigns
-```
-
-An empty catalog just means an empty feed, not a broken one.
-
-### Everything, via Docker Compose
-
-```bash
-make docker-up
-# equivalent to: docker compose up --build
-```
-
-Starts postgres, redis, the backend, the worker, and the frontend together
-(still need to run `alembic upgrade head` and create the Pinecone index
-once, per above). This also starts `kafka`/`connect` (they're regular
-services in the same `docker-compose.yml`), but **not**
-`pinecone_sync_consumer.py` — that's deliberately a native process, not a
-docker-compose service (see [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md)
-for why), so it still needs `make kafka-register-connector` +
-`make kafka-consumer` run separately even after `docker-up`.
-
-## Status
-
-Backend: fully built, tested (115 tests in the default suite, plus opt-in
-integration and adversarial suites — see `make test-integration` and
-`make test-adversarial`), and verified working end-to-end against real
-Postgres/Redis/Pinecone/OpenAI — campaign posting/review, ad
-serving/feedback, and the onboarding chat (see
-[`docs/next_phase_plan.md`](docs/next_phase_plan.md) for design details).
-Campaign eligibility (status/budget/dates) syncs from Postgres into
-Pinecone via Kafka + Debezium CDC, not a synchronous write on approval —
-see [`docs/kafka_cdc_plan.md`](docs/kafka_cdc_plan.md) for the full design,
-live verification results, and load-test data.
-
-Frontend: all four views built — onboarding chat + feed (View 1),
-performance dashboard (View 2), campaign submission (View 3), and the
-moderator queue (View 4). Verified against the real backend via scripted
-integration tests hitting the actual endpoints in the same sequence the UI
-calls them, and through direct use in the browser (`npm run dev`).
+- [spec.md](docs/spec.md): overall design and data model
+- [kafka_cdc_plan.md](docs/kafka_cdc_plan.md): CDC pipeline, bugs found in live verification, latency and load-test results
+- [adversarial_testing_plan.md](docs/adversarial_testing_plan.md): prompt-injection test plan, findings and fixes
+- [auth_plan.md](docs/auth_plan.md): OAuth + JWT + role model
+- [future_ideas.md](docs/future_ideas.md): known limitations and what I'd build next
