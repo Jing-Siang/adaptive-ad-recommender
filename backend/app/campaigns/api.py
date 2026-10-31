@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_role
+from app.core.auth import require_role, visible_campaigns
 from app.core.db import get_db
 from app.campaigns.review_jobs import review_campaign_job
 from app.core.logging_utils import log_event
@@ -81,6 +81,7 @@ def list_campaigns(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    current: CurrentUser = Depends(require_role("advertiser", "moderator")),
 ) -> CampaignListResponse:
     """List campaigns, paginated, optionally filtered by status —
     status=needs_review is the moderator queue — and/or category, and/or
@@ -88,8 +89,9 @@ def list_campaigns(
     independent of each other), sorted by any of _SORTABLE_COLUMNS.
     Filtering/searching/sorting/paging all happen in the query itself, not
     after loading rows into Python, since the catalog is thousands of
-    rows."""
-    query = db.query(Campaign)
+    rows. Advertisers only see their own campaigns, moderators see all (see
+    visible_campaigns)."""
+    query = db.query(Campaign).filter(visible_campaigns(current))
     if status:
         query = query.filter_by(status=status)
     if category:

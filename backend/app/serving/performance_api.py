@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Date, Float, cast, case, func
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_role
+from app.core.auth import require_role, visible_campaigns
 from app.core.db import get_db
 from app.models import Campaign, Event
 from app.schemas import (
@@ -27,19 +27,27 @@ def _rate(numerator: int, denominator: int) -> float:
 @router.get("/performance", response_model=PerformanceResponse)
 def get_performance(
     db: Session = Depends(get_db),
-    _current: CurrentUser = Depends(require_role("advertiser", "moderator")),
+    current: CurrentUser = Depends(require_role("advertiser", "moderator")),
 ) -> PerformanceResponse:
     """Aggregate CTR/engagement/dislike-rate/spend/CPA across all activity,
     plus a daily trend line and a per-campaign breakdown -- everything reads
     straight from the events table (the real history) and Campaign.budget_spent
-    (already the source of truth for spend, no need to re-derive it)."""
-    totals_by_type: dict[str, int] = dict(db.query(Event.event_type, func.count(Event.id)).group_by(Event.event_type))
+    (already the source of truth for spend, no need to re-derive it). Scoped
+    to the campaigns `current` may see (see visible_campaigns), so an
+    advertiser's dashboard covers only their own campaigns."""
+    visible = visible_campaigns(current)
+    totals_by_type: dict[str, int] = dict(
+        db.query(Event.event_type, func.count(Event.id))
+        .join(Campaign, Event.campaign_id == Campaign.id)
+        .filter(visible)
+        .group_by(Event.event_type)
+    )
     impressions = totals_by_type.get("impression", 0)
     likes = totals_by_type.get("like", 0)
     dislikes = totals_by_type.get("dislike", 0)
     conversions = totals_by_type.get("interested", 0)
     reports = totals_by_type.get("report", 0)
-    total_spend = db.query(func.coalesce(func.sum(Campaign.budget_spent), 0.0)).scalar()
+    total_spend = db.query(func.coalesce(func.sum(Campaign.budget_spent), 0.0)).filter(visible).scalar()
 
     totals = PerformanceTotals(
         impressions=impressions,
@@ -57,6 +65,8 @@ def get_performance(
     day_expr = cast(Event.created_at, Date)
     trend_rows = (
         db.query(day_expr.label("day"), Event.event_type, func.count(Event.id))
+        .join(Campaign, Event.campaign_id == Campaign.id)
+        .filter(visible)
         .group_by("day", Event.event_type)
         .order_by("day")
         .all()
@@ -112,7 +122,7 @@ def get_performance_campaigns(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current: CurrentUser = Depends(require_role("advertiser", "moderator")),
+    current: CurrentUser = Depends(require_role("advertiser", "moderator")),
 ) -> CampaignPerformanceListResponse:
     """Paginated per-campaign performance breakdown -- filtering/searching/
     sorting/paging all happen in the query itself (a single outer-joined,
@@ -135,6 +145,7 @@ def get_performance_campaigns(
             columns["ctr"].label("ctr"),
         )
         .outerjoin(Event, Event.campaign_id == Campaign.id)
+        .filter(visible_campaigns(current))
         .group_by(Campaign.id, Campaign.headline, Campaign.status, Campaign.budget_spent)
     )
     if status:

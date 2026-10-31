@@ -1,3 +1,4 @@
+import uuid
 from datetime import date
 from unittest.mock import patch
 
@@ -5,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.core.queue import redis_conn
 from app.main import app
-from app.models import Campaign
+from app.models import Campaign, User
 from tests.conftest import auth_header
 
 client = TestClient(app)
@@ -81,49 +82,49 @@ def test_create_campaign_rate_limits_after_ten_in_an_hour(mock_queue, db, advert
         redis_conn.delete(f"rate_limit:campaign_create:{advertiser_user.id}")
 
 
-def test_list_campaigns_filters_by_status(db, campaign):
+def test_list_campaigns_filters_by_status(db, campaign, advertiser_user):
     campaign.status = "needs_review"
     db.commit()
 
-    resp = client.get("/campaigns", params={"status": "needs_review"})
+    resp = client.get("/campaigns", params={"status": "needs_review"}, headers=auth_header(advertiser_user))
     assert resp.status_code == 200
     body = resp.json()
     assert campaign.id in [c["id"] for c in body["items"]]
 
-    resp_other = client.get("/campaigns", params={"status": "rejected"})
+    resp_other = client.get("/campaigns", params={"status": "rejected"}, headers=auth_header(advertiser_user))
     assert campaign.id not in [c["id"] for c in resp_other.json()["items"]]
 
 
-def test_list_campaigns_filters_by_category(db, campaign):
-    resp = client.get("/campaigns", params={"category": campaign.category})
+def test_list_campaigns_filters_by_category(db, campaign, advertiser_user):
+    resp = client.get("/campaigns", params={"category": campaign.category}, headers=auth_header(advertiser_user))
     assert resp.status_code == 200
     assert campaign.id in [c["id"] for c in resp.json()["items"]]
 
-    resp_other = client.get("/campaigns", params={"category": "not-a-real-category"})
+    resp_other = client.get("/campaigns", params={"category": "not-a-real-category"}, headers=auth_header(advertiser_user))
     assert campaign.id not in [c["id"] for c in resp_other.json()["items"]]
 
 
-def test_list_campaigns_searches_by_headline(db, campaign):
+def test_list_campaigns_searches_by_headline(db, campaign, advertiser_user):
     campaign.headline = "Unique Pytest Search Headline"
     db.commit()
 
-    resp = client.get("/campaigns", params={"search": "pytest search"})
+    resp = client.get("/campaigns", params={"search": "pytest search"}, headers=auth_header(advertiser_user))
     assert resp.status_code == 200
     assert campaign.id in [c["id"] for c in resp.json()["items"]]
 
-    resp_miss = client.get("/campaigns", params={"search": "no such headline text"})
+    resp_miss = client.get("/campaigns", params={"search": "no such headline text"}, headers=auth_header(advertiser_user))
     assert campaign.id not in [c["id"] for c in resp_miss.json()["items"]]
 
 
-def test_list_campaigns_searches_by_review_reason(db, campaign):
+def test_list_campaigns_searches_by_review_reason(db, campaign, advertiser_user):
     campaign.review_reason = "Flagged for an unverified health claim"
     db.commit()
 
-    resp = client.get("/campaigns", params={"review_reason_search": "health claim"})
+    resp = client.get("/campaigns", params={"review_reason_search": "health claim"}, headers=auth_header(advertiser_user))
     assert resp.status_code == 200
     assert campaign.id in [c["id"] for c in resp.json()["items"]]
 
-    resp_miss = client.get("/campaigns", params={"review_reason_search": "no such reason text"})
+    resp_miss = client.get("/campaigns", params={"review_reason_search": "no such reason text"}, headers=auth_header(advertiser_user))
     assert campaign.id not in [c["id"] for c in resp_miss.json()["items"]]
 
 
@@ -151,13 +152,13 @@ def test_list_campaigns_sorts_by_headline_and_budget(db, advertiser_user):
     high = _campaign("Aaa Sort Test High Budget", 50.0)
     try:
         by_headline = client.get(
-            "/campaigns", params={"search": "Sort Test", "sort_by": "headline", "sort_dir": "asc"}
+            "/campaigns", params={"search": "Sort Test", "sort_by": "headline", "sort_dir": "asc"}, headers=auth_header(advertiser_user)
         ).json()["items"]
         headline_ids = [c["id"] for c in by_headline]
         assert headline_ids.index(high.id) < headline_ids.index(low.id)  # "Aaa" before "Zzz"
 
         by_budget = client.get(
-            "/campaigns", params={"search": "Sort Test", "sort_by": "budget_total", "sort_dir": "desc"}
+            "/campaigns", params={"search": "Sort Test", "sort_by": "budget_total", "sort_dir": "desc"}, headers=auth_header(advertiser_user)
         ).json()["items"]
         budget_ids = [c["id"] for c in by_budget]
         assert budget_ids.index(high.id) < budget_ids.index(low.id)  # 50 before 5
@@ -167,8 +168,8 @@ def test_list_campaigns_sorts_by_headline_and_budget(db, advertiser_user):
         db.commit()
 
 
-def test_list_campaigns_paginates(db, campaign):
-    resp = client.get("/campaigns", params={"page": 1, "page_size": 1})
+def test_list_campaigns_paginates(db, campaign, advertiser_user):
+    resp = client.get("/campaigns", params={"page": 1, "page_size": 1}, headers=auth_header(advertiser_user))
     assert resp.status_code == 200
     body = resp.json()
     assert body["page"] == 1
@@ -176,6 +177,43 @@ def test_list_campaigns_paginates(db, campaign):
     assert len(body["items"]) == 1
     assert body["total"] >= 1
     assert body["total_pages"] >= 1
+
+
+def test_list_campaigns_requires_authentication():
+    resp = client.get("/campaigns")
+    assert resp.status_code == 401
+
+
+def test_list_campaigns_rejects_end_user_role(user):
+    resp = client.get("/campaigns", headers=auth_header(user))
+    assert resp.status_code == 403
+
+
+def test_list_campaigns_scopes_advertisers_to_their_own_campaigns(db, campaign, advertiser_user, moderator_user):
+    """An advertiser never sees another advertiser's campaigns (budgets,
+    review notes); a moderator sees everyone's, since they review them all."""
+    other_advertiser = User(
+        google_sub=f"test-google-sub-{uuid.uuid4()}",
+        email=f"pytest-advertiser-{uuid.uuid4()}@example.com",
+        display_name="Pytest Other Advertiser",
+        role="advertiser",
+    )
+    db.add(other_advertiser)
+    db.commit()
+    params = {"search": campaign.headline, "page_size": 100}
+    try:
+        own = client.get("/campaigns", params=params, headers=auth_header(advertiser_user)).json()
+        assert campaign.id in [c["id"] for c in own["items"]]
+        assert all(c["user_id"] == advertiser_user.id for c in own["items"])
+
+        other = client.get("/campaigns", params=params, headers=auth_header(other_advertiser)).json()
+        assert campaign.id not in [c["id"] for c in other["items"]]
+
+        moderator = client.get("/campaigns", params=params, headers=auth_header(moderator_user)).json()
+        assert campaign.id in [c["id"] for c in moderator["items"]]
+    finally:
+        db.delete(other_advertiser)
+        db.commit()
 
 
 def test_moderate_campaign_approve_activates(db, campaign, moderator_user):

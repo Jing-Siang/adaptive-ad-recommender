@@ -1,9 +1,10 @@
+import uuid
 from datetime import date
 
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Campaign, Event
+from app.models import Campaign, Event, User
 from app.serving.performance_api import _rate
 from tests.conftest import auth_header
 
@@ -22,10 +23,10 @@ def test_rate_helper_returns_zero_for_zero_denominator():
 
 def test_get_performance_totals_reflects_inserted_events(db, campaign, advertiser_user):
     """Inserting known impression/like/dislike/interested counts moves the
-    global totals by exactly that delta, and the derived rate fields are
-    self-consistent with whatever the resulting totals are (avoids asserting
-    exact totals, since /performance aggregates across the whole table,
-    which other tests may also be writing to)."""
+    advertiser's totals by exactly that delta, and the derived rate fields
+    are self-consistent with whatever the resulting totals are (asserts a
+    delta rather than exact totals, out of the same caution as before
+    /performance was scoped per advertiser)."""
     headers = auth_header(advertiser_user)
     before = client.get("/performance", headers=headers).json()["totals"]
 
@@ -113,6 +114,48 @@ def test_get_performance_campaigns_per_campaign_breakdown(db, campaign, advertis
     finally:
         for e in events:
             db.delete(e)
+        db.commit()
+
+
+def test_performance_is_scoped_to_the_advertisers_own_campaigns(db, campaign, advertiser_user, moderator_user):
+    """Another advertiser's dashboard never includes this campaign's events,
+    spend, or breakdown row; a moderator's (platform-wide) one does."""
+    other_advertiser = User(
+        google_sub=f"test-google-sub-{uuid.uuid4()}",
+        email=f"pytest-advertiser-{uuid.uuid4()}@example.com",
+        display_name="Pytest Other Advertiser",
+        role="advertiser",
+    )
+    db.add(other_advertiser)
+    campaign.budget_spent = 2.5
+    events = [Event(user_id="u1", campaign_id=campaign.id, event_type="impression", created_at=date(2020, 7, 1))]
+    db.add_all(events)
+    db.commit()
+
+    try:
+        other = client.get("/performance", headers=auth_header(other_advertiser)).json()
+        assert other["totals"]["impressions"] == 0
+        assert other["totals"]["total_spend"] == 0.0
+        assert "2020-07-01" not in [point["date"] for point in other["trend"]]
+        other_rows = client.get(
+            "/performance/campaigns", params={"search": campaign.headline}, headers=auth_header(other_advertiser)
+        ).json()["items"]
+        assert campaign.id not in [c["campaign_id"] for c in other_rows]
+
+        own = client.get("/performance", headers=auth_header(advertiser_user)).json()
+        assert own["totals"]["impressions"] == 1
+        assert own["totals"]["total_spend"] == 2.5
+
+        moderator = client.get("/performance", headers=auth_header(moderator_user)).json()
+        assert "2020-07-01" in [point["date"] for point in moderator["trend"]]
+        moderator_rows = client.get(
+            "/performance/campaigns", params={"search": campaign.headline}, headers=auth_header(moderator_user)
+        ).json()["items"]
+        assert campaign.id in [c["campaign_id"] for c in moderator_rows]
+    finally:
+        for e in events:
+            db.delete(e)
+        db.delete(other_advertiser)
         db.commit()
 
 

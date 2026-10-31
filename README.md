@@ -92,7 +92,7 @@ There are three main flows.
 | Agent tooling | MCP (`langchain-mcp-adapters`), native OpenAI function calling, hosted web search |
 | Auth | Google Identity Services, PyJWT |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, React Router |
-| Testing | pytest: 135 default tests, plus 1 Kafka integration test and 7 adversarial LLM tests |
+| Testing | pytest: 139 default tests, plus 1 Kafka integration test and 7 adversarial LLM tests |
 | Dev environment | Docker Compose, Makefile |
 
 ## Running locally
@@ -155,7 +155,7 @@ make help             # every available command
 ## Tests
 
 ```bash
-make test               # 135 tests, real Postgres, OpenAI/Pinecone/MCP mocked at their boundaries
+make test               # 139 tests, real Postgres, OpenAI/Pinecone/MCP mocked at their boundaries
 make test-integration   # end-to-end Kafka CDC test (needs the Kafka stack + a small real OpenAI call)
 make test-adversarial   # real prompt-injection attacks against the live model (costs real API money)
 ```

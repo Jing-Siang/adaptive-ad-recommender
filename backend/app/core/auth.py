@@ -13,10 +13,11 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
+from sqlalchemy import true
 
 from app.core.config import settings
 from app.core.queue import redis_conn
-from app.models import User
+from app.models import Campaign, User
 from app.schemas import CurrentUser
 
 _JWT_ALGORITHM = "HS256"
@@ -92,3 +93,13 @@ def require_role(*roles: str):
         return user
 
     return _check
+
+
+def visible_campaigns(user: CurrentUser):
+    """SQL filter for which campaigns `user` may see -- moderators see every
+    campaign (they review all of them), advertisers only their own. Shared
+    by every campaign-listing/aggregating endpoint so the rule lives in one
+    place, rather than each query re-deriving (or forgetting) it."""
+    if user.role == "moderator":
+        return true()
+    return Campaign.user_id == user.id

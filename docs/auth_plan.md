@@ -49,10 +49,8 @@ a self-service request/approval flow would be over-engineering.
 - **`advertiser`** -- everything above, plus submit campaigns (View 3) and
   view the performance dashboard (View 2). `Campaign.user_id` points
   straight at the submitting account (Phase 5 below) -- no separate
-  Advertiser entity. Still no per-advertiser *visibility* scoping,
-  though: `GET /campaigns` shows every advertiser's campaigns to every
-  advertiser, not just their own; that's a real follow-on, out of scope
-  here to keep this bounded.
+  Advertiser entity. An advertiser sees only their own campaigns and
+  performance data (added as a follow-on, see the end of Phase 5).
 - **`moderator`** -- everything above, plus `POST /campaigns/{id}/moderate`
   (View 4).
 
@@ -209,10 +207,15 @@ independent of the rest of the migration below.
       `reactions.user_id` migrations before it.
       `CampaignCreateRequest` dropped `advertiser_name` entirely; the
       frontend's campaign form no longer asks for one.
-- [ ] **Still not done, deliberately out of scope for this phase**:
-      per-advertiser *visibility* scoping. `GET /campaigns` still returns
-      every campaign regardless of who's asking -- an `advertiser`
-      account sees other advertisers' campaigns too, not just their own.
+- [x] **Per-advertiser visibility scoping (follow-on, 2026-11-01)**.
+      Deferred from this phase, then turned out to be worse than just
+      unscoped: `GET /campaigns` had no auth dependency at all (missed in
+      Phase 2), so anyone without a token could list every campaign with
+      budgets and review notes. Now `require_role("advertiser",
+      "moderator")`, and `GET /campaigns`, `GET /performance`, and
+      `GET /performance/campaigns` all filter through
+      `visible_campaigns()` (`app/core/auth.py`): advertisers see only
+      their own campaigns and their events/spend, moderators see all.
 
 ## Verification
 
